@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paint Quantity Calculator</title>
+<meta name="description" content="Surface area and ISO 12944 paint quantities (primer, mid coat, finish) for ASME B36.10M pipe and structural steel sections.">
+<style>
+:root {
+  --bg: #f4f6f9; --panel: #ffffff; --panel-2: #eef2f7; --ink: #15202e; --muted: #5a6779; --line: #d8dfe9;
+  --accent: #1d5fd1; --accent-ink: #ffffff; --accent-soft: #e4edfb;
+  --good: #187a4b; --warn-bg: #fff4dc; --warn-ink: #7a4a00; --bad: #b3261e; --bad-bg: #fde8e6;
+  --shadow: 0 1px 2px rgba(20, 32, 46, .06), 0 4px 14px rgba(20, 32, 46, .06);
+  --f-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --f-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151e; --panel: #172030; --panel-2: #1e2a3d; --ink: #e6edf7; --muted: #9aa8bd; --line: #2b3a52;
+    --accent: #6ea0ff; --accent-ink: #0b1220; --accent-soft: #1f3150;
+    --good: #4cc98d; --warn-bg: #3a2e12; --warn-ink: #f0c36a; --bad: #ff8a80; --bad-bg: #3d1e1c;
+    --shadow: none; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151e; --panel: #172030; --panel-2: #1e2a3d; --ink: #e6edf7; --muted: #9aa8bd; --line: #2b3a52;
+  --accent: #6ea0ff; --accent-ink: #0b1220; --accent-soft: #1f3150;
+  --good: #4cc98d; --warn-bg: #3a2e12; --warn-ink: #f0c36a; --bad: #ff8a80; --bad-bg: #3d1e1c;
+  --shadow: none; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--f-body); }
+[hidden] { display: none !important; }
+h1, h2, h3 { margin: 0; line-height: 1.2; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px 48px; }
+header.top { padding: 22px 0 14px; display: flex; gap: 12px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; }
+header.top h1 { font-size: 24px; letter-spacing: -.01em; }
+header.top p { margin: 4px 0 0; color: var(--muted); max-width: 70ch; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 16px; margin-top: 16px; }
+.card > h2 { font-size: 17px; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.step { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 13px; font-weight: 700; flex: none; }
+.hint { color: var(--muted); font-size: 13px; }
+
+.btn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; font-weight: 600; font-size: 14px; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.ghost { background: transparent; }
+.btn.icon { padding: 4px 9px; line-height: 1; font-size: 18px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+.toolbar .spacer { flex: 1; }
+
+input, select, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; min-width: 0; }
+input[type=number] { text-align: right; }
+select { max-width: 100%; }
+label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+label.field > :is(input, select) { color: var(--ink); font-weight: 400; font-size: 15px; }
+
+/* ---- tables */
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 700; padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: bottom; }
+td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th.r, td.r { text-align: right; }
+#members th, #layers th { white-space: nowrap; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tfoot td { font-weight: 700; border-bottom: 0; background: var(--panel-2); }
+.members td select, .members td input { width: 100%; }
+.members .w-qty { width: 72px; } .members .w-len { width: 88px; } .members .w-pct { width: 80px; }
+.members td:nth-child(1) select { min-width: 170px; }
+.members td:nth-child(2) :is(select, input) { min-width: 235px; }
+.members .cellpair select { min-width: 118px; }
+.cellpair { display: flex; gap: 6px; }
+.cellpair > * { flex: 1; }
+tr.err td { background: var(--bad-bg); }
+.rowmsg { color: var(--bad); font-size: 12px; margin-top: 3px; }
+.rowwarn { color: var(--warn-ink); font-size: 12px; margin-top: 3px; }
+.empty { color: var(--muted); padding: 18px 6px; text-align: center; }
+
+.summary { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 12px; color: var(--muted); font-size: 14px; }
+.summary b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* ---- system */
+.sysgrid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 10px; }
+.env { background: var(--panel-2); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 12px; }
+.env b { font-weight: 700; }
+.env div + div { margin-top: 3px; }
+.layers td select { width: 100%; min-width: 150px; }
+.layers .w-n { width: 64px; } .layers .w-d { width: 84px; }
+.notice { border-radius: 8px; padding: 9px 12px; font-size: 14px; margin-top: 10px; }
+.notice.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.notice.info { background: var(--accent-soft); }
+.notice ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* ---- results */
+.kpis { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 14px; }
+.kpi { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; }
+.kpi .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.kpi .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.kpi .s { font-size: 12px; color: var(--muted); }
+.kpi.main { background: var(--accent); color: var(--accent-ink); }
+.kpi.main .l, .kpi.main .s { color: inherit; opacity: .85; }
+td.strong { font-weight: 700; }
+.small { font-size: 13px; color: var(--muted); }
+
+details.sources { margin-top: 16px; }
+details.sources summary { cursor: pointer; font-weight: 700; }
+details.sources ul { padding-left: 20px; }
+details.sources li { margin: 6px 0; }
+code { font-family: var(--f-mono); font-size: .92em; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+
+dialog { border: 1px solid var(--line); border-radius: 12px; padding: 18px; width: min(680px, calc(100vw - 24px)); background: var(--panel); color: var(--ink); box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+dialog::backdrop { background: rgba(10, 16, 26, .55); }
+dialog textarea { width: 100%; min-height: 200px; font-family: var(--f-mono); font-size: 13px; resize: vertical; }
+dialog .msgs { max-height: 180px; overflow: auto; margin-top: 8px; font-size: 13px; }
+dialog .msgs div { padding: 3px 0; border-bottom: 1px solid var(--line); }
+dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink); }
+
+/* ---- phones: wide tables become one card per row (cells carry data-label) */
+@media (max-width: 760px) {
+  table.stack thead { display: none; }
+  table.stack, table.stack tbody, table.stack tfoot, table.stack tr, table.stack td { display: block; width: 100%; }
+  table.stack tr { border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin-bottom: 10px; }
+  table.stack tfoot tr { background: var(--panel-2); }
+  table.stack td { border: 0; padding: 4px 2px; display: grid; grid-template-columns: 112px 1fr; gap: 8px; align-items: center; text-align: left; background: transparent; }
+  table.stack td::before { content: attr(data-label); color: var(--muted); font-size: 12px; font-weight: 700; }
+  table.stack td:not([data-label]) { display: none; }
+  table.stack td.num, table.stack td.r { text-align: left; }
+  table.stack td.act { display: grid; grid-template-columns: 1fr; justify-items: end; }
+  table.stack td.act::before { display: none; }
+  .members .w-qty, .members .w-len, .members .w-pct, .layers .w-n, .layers .w-d { width: 100%; }
+  .members td:nth-child(n) :is(select, input) { min-width: 0; }
+  .layers td select { min-width: 0; }
+}
+
+@media print {
+  body { background: #fff; color: #000; font-size: 12px; }
+  .toolbar, .btn, header.top .hint, details.sources:not([open]), .noprint, .members td.act, .members th.act { display: none !important; }
+  .card { box-shadow: none; border-color: #bbb; break-inside: avoid; }
+  input, select { border: 0; background: transparent; appearance: none; -webkit-appearance: none; padding: 0; }
+  .kpi.main { background: #eee; color: #000; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Paint Quantity Calculator</h1>
+      <p>Surface area of ASME B36.10M pipe and structural steel sections, and the primer, mid coat and finish needed for an ISO 12944 corrosion category. All figures are estimates: check the notes at the bottom before ordering.</p>
+    </div>
+    <div class="hint">Saved in this browser only</div>
+  </header>
+
+  <section class="card" aria-labelledby="h-members">
+    <h2 id="h-members"><span class="step">1</span> Pipes and members</h2>
+    <div class="toolbar">
+      <button class="btn primary" id="add-pipe" type="button">+ Pipe</button>
+      <button class="btn primary" id="add-section" type="button">+ Steel section</button>
+      <button class="btn" id="add-custom" type="button" title="Flat bar, plate, tee, small tube or anything not in the database">+ Custom member</button>
+      <button class="btn" id="open-paste" type="button">Paste list…</button>
+      <button class="btn ghost" id="load-example" type="button">Load example</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="clear-all" type="button">Clear all</button>
+    </div>
+    <div class="tablewrap">
+      <table class="members stack" id="members">
+        <thead>
+          <tr><th>Type</th><th>Size</th><th>Schedule / painted</th><th class="r">Qty</th><th class="r">Length (m)</th><th class="r">Area (m²)</th><th class="r">Mass (kg)</th><th class="act"></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="members-empty">No members yet. Add a pipe or steel section, paste a list, or load the example.</div>
+    </div>
+    <div class="summary" id="members-summary"></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-system">
+    <h2 id="h-system"><span class="step">2</span> Corrosion category and paint system</h2>
+    <div class="sysgrid">
+      <label class="field">Corrosivity category (ISO 12944-2)
+        <select id="cat"></select>
+      </label>
+      <label class="field">Durability (ISO 12944-1)
+        <select id="dur"></select>
+      </label>
+      <label class="field">Paint supplier
+        <select id="supplier"></select>
+      </label>
+    </div>
+    <div class="env" id="env"></div>
+    <div class="tablewrap">
+      <table class="layers stack" id="layers">
+        <thead>
+          <tr><th>Layer</th><th>Product</th><th class="r">Coats</th><th class="r">DFT per coat (µm)</th><th class="r">Volume solids (%)</th><th class="r">Total DFT (µm)</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot><tr><td colspan="2" data-label="System">Total</td><td class="num" id="sys-coats" data-label="Coats"></td><td></td><td></td><td class="num" id="sys-dft" data-label="Total DFT (µm)"></td><td></td></tr></tfoot>
+      </table>
+    </div>
+    <div class="toolbar" style="margin-top:10px">
+      <button class="btn" id="add-layer" type="button">+ Add layer</button>
+      <button class="btn ghost" id="reset-layers" type="button">Reset to database system</button>
+      <span class="hint" id="surfprep"></span>
+    </div>
+    <div class="notice info" id="basis" hidden></div>
+    <div class="notice warn" id="warnings" hidden></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-allow">
+    <h2 id="h-allow"><span class="step">3</span> Allowances</h2>
+    <div class="sysgrid">
+      <label class="field">Application loss (% of paint used)
+        <input type="number" id="loss" min="0" max="90" step="1" inputmode="decimal">
+      </label>
+      <label class="field">Extra area for flanges, cleats, fittings (%)
+        <input type="number" id="allow" min="0" max="200" step="1" inputmode="decimal">
+      </label>
+    </div>
+    <p class="small" style="margin:0">Loss covers overspray, mixing and tin residue, wind and rough surfaces; 30 % is a common starting point for airless spray on steelwork, not a figure from ISO 12944 or a data sheet. Use your contractor's own factor if you have one. Stripe coats on edges and welds are not included: add them to the area allowance.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-results" id="results">
+    <h2 id="h-results"><span class="step">4</span> Results</h2>
+    <div class="kpis" id="kpis"></div>
+    <div class="tablewrap">
+      <table class="stack" id="paint-table">
+        <thead>
+          <tr><th>Layer</th><th>Product</th><th class="r">Coats × DFT</th><th class="r">Wet film per coat (µm)</th><th class="r">Coverage per coat (m²/L)</th><th class="r">Litres per coat</th><th class="r">Theoretical (L)</th><th class="r">With loss (L)</th></tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot></tfoot>
+      </table>
+    </div>
+    <p class="small" id="result-note"></p>
+    <div class="toolbar noprint" style="margin-top:10px">
+      <button class="btn primary" id="export-csv" type="button">Download CSV</button>
+      <button class="btn" id="print" type="button">Print</button>
+    </div>
+  </section>
+
+  <details class="card sources" id="sources">
+    <summary>Data sources, assumptions and limits (read before relying on the numbers)</summary>
+    <ul>
+      <li><b>Pipe, ASME B36.10M.</b> Outside diameters and wall thicknesses by schedule. Painted area is π × OD per metre of pipe; the optional internal surface and the steel mass use the wall thickness. Fittings, valves and flanges are not in the database: use the area allowance.</li>
+      <li><b>Structural steel.</b> The SAISC Red Book is a paid publication and nothing was copied from it. The section ranges are the standard UB/UC (BS 4), IPE/HE (DIN 1025), PFC, UPN (DIN 1026), angle (EN 10056) and hollow-section (EN 10210, EN 10219) series. Surface area per metre is computed from each section's dimensions and checked against published figures. Check a section against the current Red Book or your mill's catalogue if it matters; sections not listed (small tube, tees, flats, plate, welded sections) go in as <i>Custom member</i> with their perimeter.</li>
+      <li><b>Paint products.</b> Volume solids and recommended film thickness come from supplier data-sheet extracts (Jotun, Carboline and PPG). The supplier websites could not be opened directly, so every product carries a note of what was seen (hover the product name). Data sheets change and many products exist in variants: confirm each against the supplier's current data sheet.</li>
+      <li><b>ISO 12944.</b> The standard itself is paid and was not read directly. The category descriptions are the standard's own wording in short; the reference total film thickness for each category/durability has a stated basis (shown under the system table). The layer plans are generic builds that meet that reference with the listed products, <i>not</i> any supplier's certified system. Use the supplier's ISO 12944-6 certificate for a specification. Not covered: C1, immersion (Im1–Im4), low durability for C2/C3, galvanized or metal-sprayed steel.</li>
+      <li><b>Arithmetic.</b> Litres = area × DFT ÷ (10 × volume solids %), then ÷ (1 − loss). One coat of 100 µm at 80 % solids covers 8 m²/L theoretically. Wet film = DFT ÷ solids. Quantities are rounded up to whole litres only in the "to order" column; pack sizes are not modelled.</li>
+      <li><b>Not modelled:</b> pack sizes and prices, thinner, mist coats on zinc silicate, over-thickness, shop versus field application, galvanizing.</li>
+    </ul>
+  </details>
+</div>
+
+<dialog id="paste-dialog">
+  <h2 style="font-size:17px;margin-bottom:6px">Paste a list</h2>
+  <p class="hint" style="margin:0 0 8px">One member per line, from a spreadsheet (tab-separated) or typed with commas or semicolons:<br>
+    <code>family, size, length (m), quantity [, schedule for pipes | painted % for steel]</code><br>
+    Family: <code>PIPE</code>, <code>UB</code>, <code>UC</code>, <code>IPE</code>, <code>HEA</code>/<code>HEB</code>/<code>HEM</code>, <code>PFC</code>, <code>UPN</code>, <code>EA</code>, <code>UA</code>, <code>SHS</code>, <code>RHS</code>, <code>CHS</code> (or <code>SHS-HF</code>, <code>SHS-CF</code> …).
+    Pipe size: <code>6</code>, <code>NPS 6</code>, <code>DN150</code>, <code>1 1/2</code>. A decimal comma works when you use tabs or semicolons.</p>
+  <textarea id="paste-text" spellcheck="false" placeholder="PIPE, 6, 12, 20, 40&#10;PIPE, DN80, 6, 30, 80&#10;UB, 305x165x40, 6.0, 8&#10;SHS, 100x100x5, 3.0, 12"></textarea>
+  <div class="msgs" id="paste-msgs"></div>
+  <div class="toolbar" style="margin:12px 0 0;justify-content:flex-end">
+    <button class="btn ghost" id="paste-close" type="button">Close</button>
+    <button class="btn primary" id="paste-import" type="button">Add to list</button>
+  </div>
+</dialog>
+
+<script src="data/pipes.js"></script>
+<script src="data/sections.js"></script>
+<script src="data/paints.js"></script>
+<script src="data/iso12944.js"></script>
+<script src="calc.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

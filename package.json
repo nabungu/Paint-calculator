@@ -1,0 +1,8 @@
+{
+  "name": "painting-calculator",
+  "private": true,
+  "description": "Surface area and ISO 12944 paint quantity calculator for ASME B36.10M pipe and structural steel",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
