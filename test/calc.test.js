@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-for (const f of ["pipes", "sections", "paints", "iso12944"]) require(path.join("..", "data", f + ".js"));
+for (const f of ["pipes", "sections", "paints", "iso12944", "systems"]) require(path.join("..", "data", f + ".js"));
 const C = require("../calc.js");
 const DB = globalThis.PaintDB;
 
@@ -152,47 +152,147 @@ test("spreading rates reproduce the data-sheet figures", () => {
   close(cover("carboline-carbothane-134-hg", "carboline", 50), 13.8, 0.2); // 13.8 m2/L at 50 um
   close(cover("carboline-carbozinc-11", "carboline", 50), 12.2, 0.4);      // 12.2 m2/L at 50 um (VS 62.3 in the sheet)
   close(cover("carboline-carboguard-893", "carboline", 75), 10.1, 0.3);    // 10.1 m2/L at 75 um
+  close(cover("jotun-pilot-qd-primer", "jotun", 40), 14, 0.05);             // 14 - 4.5 m2/L
+  close(cover("jotun-pilot-qd-primer", "jotun", 125), 4.5, 0.05);
+  close(cover("jotun-penguard-hb", "jotun", 80), 6.8, 0.06);                // 6.8 - 3.6 m2/L
+  close(cover("jotun-penguard-hb", "jotun", 150), 3.6, 0.05);
+  close(cover("jotun-penguard-universal", "jotun", 75), 9.6, 0.05);         // 9.6 - 2.4 m2/L
+  close(cover("jotun-penguard-universal", "jotun", 300), 2.4, 0.05);
+  close(cover("jotun-hardtop-ax", "jotun", 100), 6.3, 0.05);                // 13 - 6.3 m2/L
+  close(cover("jotun-penguard-pro", "jotun", 100), 7.5, 0.01);              // derived from 7.5 - 1.5 m2/L
+  close(cover("jotun-penguard-pro", "jotun", 500), 1.5, 0.01);
 });
 
 // ---------------------------------------------------------------- database consistency
-test("every system x supplier resolves to products that accept the specified DFT", () => {
-  const suppliers = DB.paints.suppliers.map((s) => s.id);
-  assert.ok(suppliers.length >= 3);
-  for (const sys of DB.iso12944.systems) {
-    const total = sys.layers.reduce((s, l) => s + l.coats * l.dft, 0);
-    assert.ok(total >= sys.refNdft, `${sys.cat} ${sys.dur}: plan ${total} um < reference ${sys.refNdft} um`);
-    assert.ok(DB.iso12944.basisNotes[sys.basis], `${sys.cat} ${sys.dur}: unknown basis`);
-    assert.ok(sys.layers[0].role === "primer" && sys.layers[sys.layers.length - 1].role === "finish");
-    if (sys.cat === "CX") {
-      assert.ok(sys.layers.reduce((s, l) => s + l.coats, 0) >= 3, "CX needs >= 3 coats");
-      assert.ok(sys.layers[0].type === "ZN" && sys.layers[0].dft >= 40, "CX zinc primer >= 40 um");
-    }
-    for (const sup of suppliers) {
-      const layers = C.buildLayers(sys.cat, sys.dur, sup);
-      assert.equal(layers.length, sys.layers.length);
-      for (const l of layers) {
-        const p = C.getProduct(sup, l.productId);
-        assert.ok(p, `${sup} ${sys.cat} ${sys.dur} ${l.role}: no product`);
-        assert.equal(p.type, l.type);
-        assert.ok(l.dft >= p.dftMin && l.dft <= p.dftMax, `${sup} ${sys.cat} ${sys.dur} ${l.role}: ${l.dft} um outside ${p.name} ${p.dftMin}-${p.dftMax}`);
-        assert.equal(l.vs, p.vs);
+// ---------------------------------------------------------------- ISO 12944-5 Annex B and the Jotun selector
+test("Annex B minimums: spot values from ISO 12944-5:2018", () => {
+  const m = DB.iso12944.minimums, R = (mnoc, ndft) => ({ mnoc, ndft });
+  assert.deepEqual(m.carbon.C4.H, { zn: R(2, 200), misc: R(2, 240), akay: R(2, 260) });   // Table B.2
+  assert.deepEqual(m.carbon.C5.VH, { zn: R(3, 320), misc: R(3, 360), akay: null });
+  assert.deepEqual(m.carbon.C3.M, { zn: R(1, 60), misc: R(1, 120), akay: R(1, 160) });
+  assert.equal(m.carbon.C2.L.zn, DB.iso12944.NONE);
+  assert.equal(m.carbon.C4.VH.akay, null);
+  assert.deepEqual(m.hdg.C5.VH, { ep: R(2, 240), ay: null });                               // Table B.3
+  assert.deepEqual(m.hdg.C3.M, { ep: R(1, 80), ay: R(1, 80) });
+  assert.deepEqual(m.tsm.C4.VH, { all: R(2, 200) });                                        // Table B.4
+  assert.deepEqual(m.immersion.VH, { zn: R(2, 500), misc: R(2, 540), single: R(1, 600) });  // Table B.5
+  // within every column the minimum never falls as durability rises
+  for (const sub of ["carbon", "hdg", "tsm"]) for (const [env, t] of Object.entries(m[sub])) {
+    const cols = Object.keys(t.H);
+    for (const c of cols) {
+      let last = 0;
+      for (const d of DB.iso12944.durabilities) {
+        const r = t[d][c];
+        if (r && r !== DB.iso12944.NONE) { assert.ok(r.ndft >= last, `${sub} ${env} ${c} ${d}`); last = r.ndft; }
       }
-      assert.deepEqual(C.checkLayers(layers, sup, sys.cat, sys.dur), [], `${sup} ${sys.cat} ${sys.dur}`);
     }
   }
 });
 
-test("buildLayers returns independent copies", () => {
-  const a = C.buildLayers("C4", "H", "jotun");
-  a[0].dft = 999;
-  assert.equal(C.buildLayers("C4", "H", "jotun")[0].dft, 60);
-  assert.equal(C.getSystem("C4", "H").layers[0].dft, 60);
+test("every Jotun system reaches exactly the durability Jotun ticks (ISO tables and brochure agree)", () => {
+  assert.ok(DB.systems.length >= 80);
+  for (const sys of DB.systems) {
+    const layers = C.systemLayers(sys, "jotun");
+    for (const l of layers) {
+      const p = C.getProduct("jotun", l.productId);
+      assert.ok(p, `${sys.id}: product ${l.productId} missing`);
+      assert.equal(p.type, l.type, `${sys.id}: ${p.name} type`);
+      assert.ok(l.dft >= p.dftMin && l.dft <= p.dftMax, `${sys.id}: ${p.name} at ${l.dft} um outside ${p.dftMin}-${p.dftMax}`);
+    }
+    const a = C.assess(layers, sys.substrate, sys.env);
+    assert.equal(a.achieved, sys.dur, `${sys.id} (${sys.substrate} ${sys.env}): ISO allows ${a.achieved}, Jotun ticks up to ${sys.dur}`);
+    assert.deepEqual(C.productWarnings(layers, "jotun"), [], sys.id);
+  }
 });
 
-test("every category offered has a system, each product has valid numbers", () => {
-  for (const c of DB.iso12944.categories) {
-    if (c.id !== "C1") assert.ok(C.durabilitiesFor(c.id).length > 0, c.id);
-  }
+test("assess: columns, shortfalls and edge cases", () => {
+  const L = (type, coats, dft) => ({ type, coats, dft });
+  // zinc primer system, C4: 240 um in 3 coats -> high; very high needs 260
+  let a = C.assess([L("ZN", 1, 60), L("EP", 1, 120), L("PUR", 1, 60)], "carbon", "C4");
+  assert.equal(a.column, "Zn (R) primer");
+  assert.equal(a.achieved, "H");
+  assert.deepEqual(a.next, { dur: "VH", req: { mnoc: 3, ndft: 260 }, needCoats: 0, needDft: 20 });
+  // same thickness with an epoxy primer is judged on the stricter "other primer" column
+  a = C.assess([L("EP", 1, 120), L("EP", 1, 60), L("PUR", 1, 60)], "carbon", "C4");
+  assert.equal(a.achieved, "H");
+  a = C.assess([L("EP", 1, 100), L("PUR", 1, 60)], "carbon", "C4");                 // 160 um < 180 for medium
+  assert.equal(a.achieved, "L");
+  // alkyd cannot reach C4 very high, or anything in C5
+  assert.equal(C.assess([L("AK", 3, 120), L("AY", 1, 60)], "carbon", "C4").achieved, "H");
+  assert.equal(C.assess([L("AK", 3, 120), L("AY", 1, 60)], "carbon", "C5").achieved, null);
+  // C2 low has no minimum; C1 uses the C2 table
+  assert.equal(C.assess([L("AK", 1, 40)], "carbon", "C2").achieved, "L");
+  assert.equal(C.assess([L("ZN", 1, 60)], "carbon", "C1").achieved, "H");
+  // galvanized: alkyd not allowed; metal spray only high / very high
+  assert.equal(C.assess([L("AK", 1, 80)], "hdg", "C3").applicable, false);
+  assert.equal(C.assess([L("EP", 1, 100), L("PUR", 1, 60)], "tsm", "C4").achieved, "H");
+  assert.equal(C.assess([L("EP", 1, 100)], "tsm", "C4").achieved, null);
+  // immersion: a one-product build may use the single-coat column
+  assert.equal(C.assess([L("EP", 1, 400)], "carbon", "Im2").achieved, "H");
+  assert.equal(C.assess([L("EP", 2, 190)], "carbon", "Im2").achieved, "H");
+  assert.equal(C.assess([L("EP", 2, 180)], "carbon", "Im2").achieved, null);
+  // CX: only tested systems count
+  const cx = DB.systems.find((x) => x.env === "CX" && x.id === "LAB10-0821-REP");
+  assert.equal(C.assess(C.systemLayers(cx, "jotun"), "carbon", "CX").tested, "LAB10-0821-REP");
+  assert.equal(C.assess([L("ZN", 1, 60), L("EP", 1, 200), L("PUR", 1, 60)], "carbon", "CX").tested, null);
+  // ignored: zero-coat layers
+  assert.equal(C.assess([L("ZN", 1, 60), L("EP", 0, 500), L("PUR", 1, 100)], "carbon", "C3").totalDft, 160);
+});
+
+test("durabilitiesFor: what each environment and substrate can ask for", () => {
+  assert.deepEqual(C.durabilitiesFor("carbon", "C2"), ["L", "M", "H", "VH"]);
+  assert.deepEqual(C.durabilitiesFor("carbon", "Im2"), ["H", "VH"]);
+  assert.deepEqual(C.durabilitiesFor("tsm", "C4"), ["H", "VH"]);
+  assert.deepEqual(C.durabilitiesFor("carbon", "CX"), ["H"]);
+  assert.deepEqual(C.durabilitiesFor("hdg", "CX"), []);
+  assert.deepEqual(C.durabilitiesFor("tsm", "C2"), []);
+  assert.deepEqual(C.durabilitiesFor("hdg", "Im1"), []);
+});
+
+test("recommend: only systems that reach the durability, least paint first", () => {
+  const r = C.recommend({ substrate: "carbon", env: "C4", dur: "H", supplier: "jotun", area: 1000, lossPct: 30 });
+  assert.deepEqual(r.map((x) => x.system.id).sort(), ["C4.03", "C4.06", "C4.06A", "C4.07", "C4.07A", "C4.10", "C4.11"]);
+  for (let i = 1; i < r.length; i++) assert.ok(r[i].litres >= r[i - 1].litres - 1e-9, "sorted by litres");
+  for (const x of r) assert.equal(x.missing, false);
+  // litres are the real paint for the area
+  const q = C.paintQuantities(1000, r[0].layers, 30);
+  close(r[0].litres, q.litres, 1e-9);
+  // other suppliers: no alkyds, so the AK systems drop to the bottom flagged as missing a product
+  const c = C.recommend({ substrate: "carbon", env: "C4", dur: "H", supplier: "carboline", area: 0, lossPct: 30 });
+  const ak = c.find((x) => x.system.id === "C4.03");
+  assert.equal(ak.missing, true);
+  assert.equal(c[c.length - 1].system.id, "C4.03");
+  assert.ok(c[0].layers.every((l) => l.productId.startsWith("carboline-")));
+  // galvanized C5 very high: Jotun's selector has exactly one system (G5.05)
+  assert.deepEqual(C.recommend({ substrate: "hdg", env: "C5", dur: "VH", supplier: "jotun", area: 10, lossPct: 0 }).map((x) => x.system.id), ["G5.05"]);
+});
+
+test("checkLayers: product ranges, zinc primer range and shortfall wording", () => {
+  const sys = C.getLibrarySystem("C4.06", "carbon", "C4");
+  const layers = C.systemLayers(sys, "jotun");
+  assert.deepEqual(C.checkLayers(layers, "jotun", { substrate: "carbon", env: "C4", dur: "H" }), []);
+  const w = C.checkLayers(layers, "jotun", { substrate: "carbon", env: "C4", dur: "VH" });
+  assert.ok(w.some((m) => /needs at least 3 coats and 260/.test(m)), w.join(" | "));
+  layers[0].dft = 30;
+  const w2 = C.checkLayers(layers, "jotun", { substrate: "carbon", env: "C4", dur: "H" });
+  assert.ok(w2.some((m) => /40–80/.test(m)));
+  assert.ok(w2.some((m) => /outside its recommended/.test(m)));
+  const ak = C.checkLayers([{ type: "AK", coats: 3, dft: 120, productId: "jotun-pilot-qd-primer" }], "jotun", { substrate: "carbon", env: "C5", dur: "L" });
+  assert.ok(ak.some((m) => /not reachable/.test(m)));
+});
+
+test("categoryFromLoss follows ISO 12944-2 Table 1 and takes the higher category", () => {
+  assert.equal(C.categoryFromLoss({ steelGm2: 10 }).env, "C1");
+  assert.equal(C.categoryFromLoss({ steelGm2: 10.1 }).env, "C2");
+  assert.equal(C.categoryFromLoss({ steelGm2: 400 }).env, "C3");
+  assert.equal(C.categoryFromLoss({ steelUm: 80.5 }).env, "C5");
+  assert.equal(C.categoryFromLoss({ zincGm2: 20 }).env, "C4");
+  assert.equal(C.categoryFromLoss({ steelGm2: 300, zincGm2: 20 }).env, "C4");
+  assert.equal(C.categoryFromLoss({ steelGm2: 6000 }).env, "beyond CX");
+  assert.equal(C.categoryFromLoss({}), null);
+});
+
+test("each product has valid numbers and a source note", () => {
   const ids = new Set();
   for (const s of DB.paints.suppliers) for (const p of s.products) {
     assert.ok(!ids.has(p.id), `duplicate ${p.id}`); ids.add(p.id);
@@ -203,18 +303,6 @@ test("every category offered has a system, each product has valid numbers", () =
   }
 });
 
-test("checkLayers flags thin film, out-of-range DFT and CX minimums", () => {
-  const l = C.buildLayers("C4", "H", "jotun");
-  l[1].dft = 50;
-  const w = C.checkLayers(l, "jotun", "C4", "H");
-  assert.ok(w.some((m) => /below the 240/.test(m)));
-  assert.ok(w.some((m) => /outside its recommended/.test(m)));
-  const cx = C.buildLayers("CX", "H", "ppg");
-  cx[1].coats = 0;
-  assert.ok(C.checkLayers(cx, "ppg", "CX", "H").some((m) => /at least 3 coats/.test(m)));
-});
-
-// ---------------------------------------------------------------- bulk import
 test("parseList: pipes, sections, decimal commas, aliases and errors", () => {
   const txt = [
     "family,size,length,qty",
@@ -283,7 +371,7 @@ test("end to end: small job", () => {
     { kind: "section", family: "SHS-HF", size: "100x100x5", length: 3, qty: 8 }
   ];
   const t = C.totals(lines, 5);
-  const layers = C.buildLayers("C4", "H", "jotun");
+  const layers = C.systemLayers(C.getLibrarySystem("C4.06", "carbon", "C4"), "jotun");
   const q = C.paintQuantities(t.totalArea, layers, 30);
   // independent recomputation
   const area = (Math.PI * 0.2191 * 120 + 1.0622 * 60 + 0.3871 * 24) * 1.05;

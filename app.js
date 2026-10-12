@@ -3,7 +3,7 @@
   "use strict";
   const DB = globalThis.PaintDB, C = globalThis.PaintCalc;
   const KEY = "paintcalc.v1";
-  const CUSTOM = "CUSTOM";
+  const ISO = DB.iso12944;
   const ROLE = { primer: "Primer", mid: "Mid coat", finish: "Finish coat" };
   const TYPE_NAME = DB.paints.layerTypes;
 
@@ -33,19 +33,25 @@
   let uid = 0;
   const newId = () => "r" + Date.now().toString(36) + (uid++).toString(36);
   const supplierName = (id) => (C.getSupplier(id) || { name: "" }).name;
+  const supplierShort = (id) => { const x = C.getSupplier(id); return x ? x.short || x.name : ""; };
 
   // ------------------------------------------------------------------ state
   function fresh() {
-    return { lines: [], cat: "C4", dur: "H", supplier: "jotun", layers: C.buildLayers("C4", "H", "jotun"), loss: 30, allow: 0 };
+    return { lines: [], substrate: "carbon", env: "C4", dur: "H", supplier: "jotun", systemId: null, layers: [], loss: 30, allow: 0 };
   }
   function sanitize(s) {
     const f = fresh();
     const out = { ...f, ...s };
     const valid = (l) => l && (l.kind === "custom" || (l.kind === "pipe" && C.findPipe(l.size)) || (l.kind === "section" && C.findSection(l.family, l.size)));
     out.lines = (Array.isArray(s.lines) ? s.lines : []).filter(valid).map((l) => ({ ...l, id: l.id || newId() }));
+    if (!s.env && s.cat) out.env = s.cat === "CUSTOM" ? "C4" : s.cat;   // saved by the first version, which had no env
+    delete out.cat;
+    if (!ISO.substrates.some((x) => x.id === out.substrate)) out.substrate = f.substrate;
     if (!C.getSupplier(out.supplier)) out.supplier = f.supplier;
-    if (out.cat !== CUSTOM && !C.getSystem(out.cat, out.dur)) { out.cat = f.cat; out.dur = f.dur; out.layers = []; }
-    if (!Array.isArray(out.layers) || !out.layers.length) out.layers = C.buildLayers(out.cat === CUSTOM ? "C4" : out.cat, out.cat === CUSTOM ? "H" : out.dur, out.supplier);
+    if (!C.durabilitiesFor(out.substrate, out.env).length) { out.env = f.env; out.substrate = f.substrate; }
+    if (!C.durabilitiesFor(out.substrate, out.env).includes(out.dur)) out.dur = f.dur;
+    if (!out.systemId || !C.getLibrarySystem(out.systemId, out.substrate, out.env)) out.systemId = null;
+    if (!Array.isArray(out.layers)) out.layers = [];
     out.loss = Number.isFinite(+out.loss) ? +out.loss : 30;
     out.allow = Number.isFinite(+out.allow) ? +out.allow : 0;
     return out;
@@ -182,139 +188,253 @@
     return "UB";
   }
 
-  // ------------------------------------------------------------------ system (category, supplier, layers)
-  const catSel = $("#cat"), durSel = $("#dur"), supSel = $("#supplier"), layerBody = $("#layers tbody");
+  // ------------------------------------------------------------------ environment, system choice and ISO 12944 check
+  const subSel = $("#substrate"), envSel = $("#env"), durSel = $("#dur"), supSel = $("#supplier"), layerBody = $("#layers tbody");
+  const durLabel = (d) => `${ISO.durability[d].label} (${ISO.durability[d].years})`;
+  const sysName = (id) => (/A$/.test(id) ? `${id.slice(0, -1)} alternative` : id);
+  const prodName = (id) => { const p = C.getProduct(state.supplier, id); return p ? p.name : "no product"; };
+  const band = (r) => (r[0] === 0 ? `≤ ${r[1]}` : `${r[0]}–${r[1]}`.replace(/\./g, Number(1.5).toLocaleString().charAt(1)));
+  const currentSystem = () => (state.systemId ? C.getLibrarySystem(state.systemId, state.substrate, state.env) : null);
 
   function fillStaticSelects() {
-    catSel.replaceChildren(
-      ...DB.iso12944.categories.filter((c) => C.durabilitiesFor(c.id).length).map((c) => h("option", { value: c.id }, `${c.id} – ${c.name}`)),
-      h("option", { value: CUSTOM }, "Custom system (enter your own layers)"));
-    supSel.replaceChildren(...DB.paints.suppliers.map((s) => h("option", { value: s.id }, s.name)));
+    fill(subSel, ISO.substrates.map((x) => h("option", { value: x.id }, x.name)));
+    fill(supSel, DB.paints.suppliers.map((x) => h("option", { value: x.id }, x.name)));
   }
-  function fillDurability() {
-    durSel.replaceChildren();
-    if (state.cat === CUSTOM) { durSel.append(h("option", { value: "" }, "n/a")); durSel.disabled = true; return; }
-    durSel.disabled = false;
-    for (const d of C.durabilitiesFor(state.cat)) {
-      const info = DB.iso12944.durability[d];
-      durSel.append(h("option", { value: d }, `${info.label} (${info.years})`));
-    }
+  function fillEnvAndDur() {
+    const envs = ISO.environments.filter((e) => C.durabilitiesFor(state.substrate, e.id).length);
+    if (!envs.some((e) => e.id === state.env)) state.env = envs.some((e) => e.id === "C4") ? "C4" : envs[0].id;
+    const opt = (e) => h("option", { value: e.id }, `${e.id} – ${e.name}`);
+    fill(envSel,
+      h("optgroup", { label: "Atmosphere" }, envs.filter((e) => /^C/.test(e.id)).map(opt)),
+      envs.some((e) => /^Im/.test(e.id)) ? h("optgroup", { label: "Water and soil" }, envs.filter((e) => /^Im/.test(e.id)).map(opt)) : null);
+    envSel.value = state.env;
+    const ds = C.durabilitiesFor(state.substrate, state.env);
+    if (!ds.includes(state.dur)) state.dur = ds.includes("H") ? "H" : ds[ds.length - 1];
+    const single = C.getEnv(state.env).kind === "part9";
+    fill(durSel, ds.map((d) => h("option", { value: d }, single ? `${durLabel(d)}: the only class in ISO 12944-9` : durLabel(d))));
     durSel.value = state.dur;
   }
   function renderEnv() {
-    const env = $("#env");
-    $("#surfprep").textContent = state.cat === CUSTOM ? "" : DB.iso12944.surfacePrep;
-    if (state.cat === CUSTOM) {
-      env.replaceChildren(h("div", {}, "Custom system: set the layers, coats, film thickness and volume solids yourself in the table below."));
-      return;
-    }
-    const c = DB.iso12944.categories.find((x) => x.id === state.cat);
-    const d = DB.iso12944.durability[state.dur];
-    env.replaceChildren(
-      h("div", {}, h("b", {}, `${c.id} ${c.name.toLowerCase()} corrosivity`), ` · carbon steel loses about ${c.steelLoss} in the first year`),
-      h("div", {}, h("b", {}, "Inside: "), c.inside),
-      h("div", {}, h("b", {}, "Outside: "), c.outside),
-      h("div", {}, h("b", {}, "Durability: "), `${d.label}, ${d.years} to first major maintenance (a planning range, not a guarantee)`));
+    const e = C.getEnv(state.env), d = ISO.durability[state.dur];
+    fill($("#env-info"),
+      e.steelGm2
+        ? h("div", {}, h("b", {}, `${e.id} ${e.name.toLowerCase()} corrosivity`), ` · first-year loss: carbon steel ${band(e.steelGm2)} g/m² (${band(e.steelUm)} µm), zinc ${band(e.zincGm2)} g/m²`)
+        : h("div", {}, h("b", {}, `${e.id}: ${e.name.toLowerCase()}`)),
+      e.outside ? h("div", {}, h("b", {}, "Outside: "), e.outside) : null,
+      e.inside ? h("div", {}, h("b", {}, "Inside: "), e.inside) : null,
+      e.examples ? h("div", {}, h("b", {}, "Examples: "), e.examples) : null,
+      h("div", {}, h("b", {}, "Durability: "), `${d.label}, ${d.years} to the first major maintenance (a planning range, not a guarantee)`),
+      e.id === "C1" ? h("div", { class: "small", style: "margin-top:4px" }, ISO.notes.c1) : null);
   }
 
+  // ---- qualifying systems
+  let lastArea = 0;
+  function renderRecs() {
+    const recs = C.recommend({ substrate: state.substrate, env: state.env, dur: state.dur, supplier: state.supplier, area: lastArea, lossPct: state.loss });
+    const sub = ISO.substrates.find((x) => x.id === state.substrate);
+    $("#recs-title").textContent = `Systems that meet ${state.env} ${ISO.durability[state.dur].label.toLowerCase()} on ${sub.name.split(" (")[0].toLowerCase()}: ${recs.length}`;
+    $("#recs-litres-h").textContent = lastArea > 0 ? "Paint for this job (L)" : "Paint per 100 m² (L)";
+    fill($("#recs-note"),
+      "From Jotun's ISO 12944 Coating Selector (rev. 2), sorted by least paint. ",
+      state.supplier === "jotun" ? "" : `With ${supplierShort(state.supplier)} selected, Jotun's builds are shown with ${supplierShort(state.supplier)} products of the same type: they are not ${supplierShort(state.supplier)}-certified systems. `,
+      C.getEnv(state.env).kind === "part9" ? "CX and Im4 systems are Jotun's ISO 12944-9 tested systems." : "");
+    const body = $("#recs tbody");
+    if (!recs.length) {
+      fill(body, h("tr", {}, h("td", { colspan: 6, class: "empty" }, "No system in the library for this combination. Build your own layers below; the ISO check still works.")));
+      return recs;
+    }
+    const best = recs.find((r) => !r.missing && !r.warnings.length);
+    fill(body, recs.map((r) => {
+      const id = r.system.id;
+      return h("tr", { class: id === state.systemId ? "sel" : "" },
+        h("td", { dataset: { label: "System" } }, h("div", {}, h("b", {}, sysName(id)),
+          r === best ? h("span", { class: "badge good" }, "least paint") : null,
+          r.missing ? h("span", { class: "badge warn" }, "no product for a layer") : r.warnings.length ? h("span", { class: "badge warn", title: r.warnings.join("\n") }, "check DFT ranges") : null,
+          h("div", { class: "small" }, r.system.table + (r.system.note ? ` · ${r.system.note}` : "")))),
+        h("td", { dataset: { label: "Build" } }, r.layers.map((l) => `${prodName(l.productId)} ${l.coats > 1 ? l.coats + " × " : ""}${l.dft}`).join(" + ")),
+        h("td", { class: "num", dataset: { label: "NDFT / coats" } }, `${r.totalDft} µm / ${r.coats}`),
+        h("td", { dataset: { label: "Rated up to" } }, ISO.durability[r.system.dur].label),
+        h("td", { class: "num", dataset: { label: lastArea > 0 ? "Paint (L)" : "L per 100 m²" } }, nf(r.litres, 0)),
+        h("td", { class: "act" }, h("button", { class: id === state.systemId ? "btn primary" : "btn", type: "button", onclick: () => selectSystem(id) }, id === state.systemId ? "Selected" : "Use")));
+    }));
+    return recs;
+  }
+  function selectSystem(id) {
+    const sys = C.getLibrarySystem(id, state.substrate, state.env);
+    if (!sys) return;
+    state.systemId = id;
+    state.layers = C.systemLayers(sys, state.supplier);
+    renderLayers(); afterLayerChange();
+  }
+  /** After a change of substrate, environment, durability or supplier: keep the chosen system if it still qualifies. */
+  function autoSelect() {
+    const recs = C.recommend({ substrate: state.substrate, env: state.env, dur: state.dur, supplier: state.supplier, area: lastArea, lossPct: state.loss });
+    const keep = recs.find((r) => r.system.id === state.systemId);
+    if (keep) selectSystem(keep.system.id);
+    else if (recs.length) selectSystem(recs[0].system.id);
+    else { state.systemId = null; renderLayers(); afterLayerChange(); }
+  }
+  function isEdited() {
+    const sys = currentSystem();
+    if (!sys) return true;
+    const ref = C.systemLayers(sys, state.supplier);
+    return ref.length !== state.layers.length || ref.some((l, i) => {
+      const m = state.layers[i];
+      return l.type !== m.type || l.coats !== +m.coats || l.dft !== +m.dft || l.productId !== m.productId || +l.vs !== +m.vs;
+    });
+  }
+
+  // ---- layer editor
   function productOptions(layer) {
     const sup = C.getSupplier(state.supplier);
-    const types = Object.keys(TYPE_NAME);
-    const groups = types.map((t) => ({ t, ps: sup.products.filter((p) => p.type === t) })).filter((g) => g.ps.length);
-    // put the layer's own type first
-    groups.sort((a, b) => (b.t === layer.type) - (a.t === layer.type));
+    const groups = Object.keys(TYPE_NAME).map((t) => ({ t, ps: sup.products.filter((p) => p.type === t) })).filter((g) => g.ps.length);
+    groups.sort((a, b) => (b.t === layer.type) - (a.t === layer.type));   // the layer's own type first
     const opts = groups.map((g) => h("optgroup", { label: TYPE_NAME[g.t] }, g.ps.map((p) => h("option", { value: p.id }, `${p.name} (${p.vs}% solids)`))));
-    if (layer.productId && !C.getProduct(state.supplier, layer.productId)) opts.unshift(h("option", { value: layer.productId }, "Other product"));
+    if (!layer.productId || !C.getProduct(state.supplier, layer.productId)) opts.unshift(h("option", { value: layer.productId || "" }, `No ${(TYPE_NAME[layer.type] || "product").toLowerCase()} from this supplier`));
     return opts;
   }
-
   function layerRow(layer, index) {
     const refs = {};
-    const prod = C.getProduct(state.supplier, layer.productId);
     refs.info = h("div", { class: "small" });
     refs.total = h("td", { class: "num", dataset: { label: "Total DFT (µm)" } });
+    const label = ROLE[layer.role] || "Layer";
     const upd = () => {
       layer.coats = numVal(refs.coats); layer.dft = numVal(refs.dft); layer.vs = numVal(refs.vs);
       refreshLayerRow(layer, refs);
       afterLayerChange();
     };
-    refs.coats = h("input", { type: "number", class: "w-n", min: 0, max: 12, step: 1, inputmode: "numeric", "aria-label": `${ROLE[layer.role] || "Layer"} number of coats`, value: layer.coats, oninput: upd });
-    refs.dft = h("input", { type: "number", class: "w-d", min: 0, step: 5, inputmode: "decimal", "aria-label": `${ROLE[layer.role] || "Layer"} dry film thickness per coat in micrometres`, value: layer.dft, oninput: upd });
-    refs.vs = h("input", { type: "number", class: "w-d", min: 1, max: 100, step: 1, inputmode: "decimal", "aria-label": `${ROLE[layer.role] || "Layer"} volume solids percent`, value: layer.vs, oninput: upd });
-    refs.prod = h("select", { "aria-label": `${ROLE[layer.role] || "Layer"} product`, onchange: (e) => {
+    refs.coats = h("input", { type: "number", class: "w-n", min: 0, max: 12, step: 1, inputmode: "numeric", "aria-label": `${label} number of coats`, value: layer.coats, oninput: upd });
+    refs.dft = h("input", { type: "number", class: "w-d", min: 0, step: 5, inputmode: "decimal", "aria-label": `${label} dry film thickness per coat in micrometres`, value: layer.dft, oninput: upd });
+    refs.vs = h("input", { type: "number", class: "w-d", min: 1, max: 100, step: 1, inputmode: "decimal", "aria-label": `${label} volume solids percent`, value: layer.vs, oninput: upd });
+    refs.prod = h("select", { "aria-label": `${label} product`, onchange: (e) => {
       const p = C.getProduct(state.supplier, e.target.value);
       layer.productId = e.target.value;
       if (p) { layer.type = p.type; layer.vs = p.vs; refs.vs.value = p.vs; }
       refreshLayerRow(layer, refs);
       afterLayerChange();
-    }, value: layer.productId }, productOptions(layer));
+    }, value: layer.productId || "" }, productOptions(layer));
     const tr = h("tr", {},
-      h("td", { class: "strong", dataset: { label: "Layer" } }, ROLE[layer.role] || "Layer"),
+      h("td", { class: "strong", dataset: { label: "Layer" } }, h("div", {}, label, h("div", { class: "small" }, TYPE_NAME[layer.type] || ""))),
       h("td", { dataset: { label: "Product" } }, h("div", {}, refs.prod, refs.info)),
       h("td", { class: "r", dataset: { label: "Coats" } }, refs.coats),
       h("td", { class: "r", dataset: { label: "DFT / coat (µm)" } }, refs.dft),
       h("td", { class: "r", dataset: { label: "Solids (%)" } }, refs.vs),
       refs.total,
       h("td", { class: "act" }, state.layers.length > 1
-        ? h("button", { class: "btn icon ghost", type: "button", title: "Remove this layer", "aria-label": "Remove this layer", onclick: () => { state.layers.splice(index, 1); renderLayers(); afterLayerChange(); } }, "×")
+        ? h("button", { class: "btn icon ghost", type: "button", title: "Remove this layer", "aria-label": "Remove this layer", onclick: () => { state.layers.splice(index, 1); relabelRoles(); renderLayers(); afterLayerChange(); } }, "×")
         : null));
     refreshLayerRow(layer, refs);
     return tr;
   }
+  function relabelRoles() {
+    const n = state.layers.length;
+    state.layers.forEach((l, i) => { l.role = i === 0 ? "primer" : i === n - 1 ? "finish" : "mid"; });
+  }
   function refreshLayerRow(layer, refs) {
     const p = C.getProduct(state.supplier, layer.productId);
     refs.prod.title = p ? p.source : "";
-    refs.info.replaceChildren(p ? `${p.chem} · recommended ${p.dftMin}–${p.dftMax} µm` : "");
+    fill(refs.info, p ? `${p.chem} · recommended ${p.dftMin}–${p.dftMax} µm` : "");
     const out = p && layer.coats > 0 && (layer.dft < p.dftMin || layer.dft > p.dftMax);
     refs.info.style.color = out ? "var(--warn-ink)" : "";
     refs.total.textContent = nf((Math.round(+layer.coats) || 0) * (+layer.dft || 0), 0);
   }
   function renderLayers() {
-    layerBody.replaceChildren(...state.layers.map(layerRow));
+    fill(layerBody, state.layers.length ? state.layers.map(layerRow)
+      : h("tr", {}, h("td", { colspan: 7, class: "empty" }, "No layers. Pick a system above or add a layer.")));
+  }
+
+  // ---- ISO 12944-5 check
+  const reqText = (r) => (r === ISO.NONE ? "no minimum" : r ? `≥ ${r.mnoc} coat${r.mnoc > 1 ? "s" : ""}, ${r.ndft} µm` : "not in table");
+  function renderCompliance() {
+    const a = C.assess(state.layers, state.substrate, state.env);
+    const el = $("#compliance");
+    if (a.table === "ISO 12944-9") {
+      fill(el, h("div", { class: "head" }, a.tested
+        ? [h("b", {}, "✓ Tested system. "), `This build matches Jotun's ISO 12944-9 system ${a.tested}.`]
+        : [h("b", {}, "Not a tested system. "), "This build does not match any ISO 12944-9 system in the library."]),
+      h("div", { class: "next" }, ISO.notes.part9));
+      return a;
+    }
+    if (!a.applicable) { fill(el, h("div", { class: "head" }, h("b", {}, "ISO 12944-5 check: "), a.reason || "not applicable")); return a; }
+    const want = ISO.durabilities.indexOf(state.dur), got = a.achieved ? ISO.durabilities.indexOf(a.achieved) : -1;
+    fill(el,
+      h("div", { class: "head" }, h("b", {}, got >= want ? "✓ Meets " : "✗ Does not meet "),
+        h("b", {}, `${state.env} ${ISO.durability[state.dur].label.toLowerCase()}. `),
+        `ISO 12944-5 ${a.table}, ${a.column} column: this build is ${a.coats} coat${a.coats === 1 ? "" : "s"} and ${a.totalDft} µm, `,
+        a.achieved ? `which allows up to ${ISO.durability[a.achieved].label.toLowerCase()} durability.` : "which is below every minimum in the table."),
+      h("div", { class: "grid" }, a.rows.map((r) => h("div", { class: `cell ${r.ok ? "ok" : "no"}` },
+        h("b", {}, `${r.ok ? "✓" : "✗"} ${ISO.durability[r.dur].label}`),
+        reqText(r.req), r.alt ? ` (or ${reqText(r.alt)})` : ""))),
+      a.next ? h("div", { class: "next" }, `For ${ISO.durability[a.next.dur].label.toLowerCase()}: ${[a.next.needDft ? `${a.next.needDft} µm more` : "", a.next.needCoats ? `${a.next.needCoats} more coat${a.next.needCoats > 1 ? "s" : ""}` : ""].filter(Boolean).join(" and ")}.`) : null);
+    return a;
+  }
+  function renderNotes() {
+    const primer = state.layers.find((l) => +l.coats > 0);
+    const prep = state.substrate === "hdg" ? ISO.surfacePrep.hdg : state.substrate === "tsm" ? ISO.surfacePrep.tsm
+      : primer && primer.type === "ZN" ? ISO.surfacePrep.carbonZn : ISO.surfacePrep.carbonOther;
+    fill($("#notes-body"),
+      h("ul", {},
+        h("li", {}, h("b", {}, "Surface preparation: "), prep),
+        state.substrate === "carbon" ? h("li", {}, ISO.surfacePrep.rustD) : null,
+        primer && primer.type === "ZN" ? h("li", {}, ISO.notes.znPrimer) : null,
+        h("li", {}, ISO.notes.airless),
+        h("li", {}, ISO.notes.maxDft),
+        h("li", {}, ISO.notes.special)),
+      h("b", { class: "small" }, "Design (ISO 12944-3)"),
+      h("ul", {}, ISO.notes.design.map((d) => h("li", {}, d))));
   }
   function afterLayerChange() {
     const coats = state.layers.reduce((s, l) => s + (Math.round(+l.coats) || 0), 0);
     const dft = state.layers.reduce((s, l) => s + (Math.round(+l.coats) || 0) * (+l.dft || 0), 0);
     $("#sys-coats").textContent = nf(coats, 0);
     $("#sys-dft").textContent = nf(dft, 0);
-    const basis = $("#basis"), warn = $("#warnings");
-    const sys = state.cat === CUSTOM ? null : C.getSystem(state.cat, state.dur);
-    if (sys) {
-      basis.hidden = false;
-      basis.replaceChildren(h("b", {}, `Reference total film thickness for ${sys.cat} ${DB.iso12944.durability[sys.dur].label.toLowerCase()}: ${sys.refNdft} µm. `), DB.iso12944.basisNotes[sys.basis],
-        " The layers below are a generic build that meets it; they are not a supplier's certified system.");
-    } else basis.hidden = true;
-    const w = C.checkLayers(state.layers, state.supplier, state.cat, state.dur);
+    const sys = currentSystem();
+    $("#sel-name").textContent = sys ? `· ${sysName(sys.id)}${isEdited() ? " (edited)" : ""}` : "· your own build";
+    renderCompliance();
+    renderNotes();
+    const w = C.checkLayers(state.layers, state.supplier, { substrate: state.substrate, env: state.env, dur: state.dur })
+      .filter((m) => !/^Falls short|not reachable/.test(m));   // shown in the ISO panel instead
+    const warn = $("#warnings");
     warn.hidden = !w.length;
-    warn.replaceChildren(...(w.length ? [h("b", {}, "Check:"), h("ul", {}, w.map((m) => h("li", {}, m)))] : []));
+    fill(warn, w.length ? [h("b", {}, "Check:"), h("ul", {}, w.map((m) => h("li", {}, m)))] : []);
     recalc();
   }
 
-  function applyDatabaseSystem() {
-    const cat = state.cat === CUSTOM ? "C4" : state.cat, dur = state.cat === CUSTOM ? "H" : state.dur;
-    state.layers = C.buildLayers(cat, dur, state.supplier);
+  function onSubstrate() {
+    state.substrate = subSel.value;
+    fillEnvAndDur(); renderEnv(); autoSelect();
   }
-  function onCategory() {
-    state.cat = catSel.value;
-    if (state.cat !== CUSTOM) {
-      const avail = C.durabilitiesFor(state.cat);
-      if (!avail.includes(state.dur)) state.dur = avail.includes("H") ? "H" : avail[avail.length - 1];
-      applyDatabaseSystem();
-    }
-    fillDurability(); renderEnv(); renderLayers(); afterLayerChange();
+  function onEnv() {
+    state.env = envSel.value;
+    fillEnvAndDur(); renderEnv(); autoSelect();
   }
   function onDurability() {
     state.dur = durSel.value;
-    applyDatabaseSystem();
-    renderEnv(); renderLayers(); afterLayerChange();
+    renderEnv(); autoSelect();
   }
   function onSupplier() {
     state.supplier = supSel.value;
-    for (const l of state.layers) {
-      const p = C.pickProduct(state.supplier, l.type, +l.dft);
-      if (p) { l.productId = p.id; l.vs = p.vs; }
-    }
-    renderLayers(); afterLayerChange();
+    autoSelect();
+  }
+
+  // ---- category helper (ISO 12944-2 Table 1)
+  const helper = $("#helper-dialog");
+  let helperPick = null;
+  function updateHelper() {
+    const v = (id) => ($(id).value === "" ? undefined : $(id).value);
+    const r = C.categoryFromLoss({ steelGm2: v("#h-steel-g"), steelUm: v("#h-steel-um"), zincGm2: v("#h-zinc-g"), zincUm: v("#h-zinc-um") });
+    const names = { steelGm2: "steel g/m²", steelUm: "steel µm", zincGm2: "zinc g/m²", zincUm: "zinc µm" };
+    helperPick = r && r.env !== "beyond CX" ? r.env : null;
+    fill($("#h-result"), !r ? "Enter a measured loss."
+      : [h("b", {}, r.env === "beyond CX" ? "Beyond CX: above the highest band in ISO 12944-2. Get specialist advice." : `${r.env} – ${C.getEnv(r.env).name}`),
+        h("div", { class: "small" }, Object.entries(r.byMeasure).map(([k, e]) => `${names[k]} → ${e}`).join(" · "))]);
+    $("#helper-use").disabled = !helperPick || !C.durabilitiesFor(state.substrate, helperPick).length;
+  }
+  function fillBands() {
+    const cats = ISO.environments.filter((e) => e.steelGm2);
+    fill($("#h-bands"),
+      h("thead", {}, h("tr", {}, ["Category", "Steel g/m²", "Steel µm", "Zinc g/m²", "Zinc µm"].map((t) => h("th", {}, t)))),
+      h("tbody", {}, cats.map((e) => h("tr", {}, h("td", {}, `${e.id} ${e.name.toLowerCase()}`), [e.steelGm2, e.steelUm, e.zincGm2, e.zincUm].map((b) => h("td", { class: "num" }, band(b)))))));
   }
 
   // ------------------------------------------------------------------ results
@@ -322,6 +442,8 @@
 
   function recalc() {
     const t = C.totals(state.lines, state.allow);
+    lastArea = t.totalArea;
+    renderRecs();
     state.lines.forEach((line, i) => {
       const refs = rowRefs.get(line.id), m = t.lines[i];
       if (!refs) return;
@@ -352,12 +474,37 @@
     return [...map.values()];
   }
 
+  /** Plain-text specification of the current choice, for copying into a document. */
+  function specLines(q) {
+    const e = C.getEnv(state.env), sub = ISO.substrates.find((x) => x.id === state.substrate), sys = currentSystem();
+    const a = C.assess(state.layers, state.substrate, state.env);
+    const primer = state.layers.find((l) => +l.coats > 0);
+    const prep = state.substrate === "hdg" ? ISO.surfacePrep.hdg : state.substrate === "tsm" ? ISO.surfacePrep.tsm
+      : primer && primer.type === "ZN" ? ISO.surfacePrep.carbonZn : ISO.surfacePrep.carbonOther;
+    const lines = [
+      `Environment: ${e.id} ${e.name.toLowerCase()} (ISO 12944-2). Durability: ${ISO.durability[state.dur].label.toLowerCase()}, ${ISO.durability[state.dur].years} (ISO 12944-1).`,
+      `Substrate: ${sub.name}.`,
+      `Surface preparation: ${prep}`,
+      `Paint system: ${sys ? `Jotun ${sysName(sys.id)}${state.supplier === "jotun" ? "" : `, with ${supplierShort(state.supplier)} products substituted`}${isEdited() ? " (edited)" : ""}` : "own build"}`
+    ];
+    q.rows.filter((r) => r.coats > 0).forEach((r) => lines.push(`  ${ROLE[r.role] || "Layer"}: ${prodName(r.productId)}, ${r.coats} \u00D7 ${r.dft} \u00B5m DFT`));
+    lines.push(`Total NDFT ${q.totalDft} \u00B5m in ${q.totalCoats} coat${q.totalCoats === 1 ? "" : "s"}.`);
+    if (a.table === "ISO 12944-9") lines.push(a.tested ? `Tested to ISO 12944-9 (Jotun report ${a.tested}).` : "Not a tested ISO 12944-9 system: confirm suitability with the paint maker.");
+    else if (a.applicable) lines.push(a.achieved
+      ? `Meets ISO 12944-5 ${a.table} (${a.column}) up to ${ISO.durability[a.achieved].label.toLowerCase()} durability${ISO.durabilities.indexOf(a.achieved) < ISO.durabilities.indexOf(state.dur) ? ` \u2014 BELOW the required ${ISO.durability[state.dur].label.toLowerCase()}` : ""}.`
+      : `Does not meet the ISO 12944-5 ${a.table} minimums.`);
+    lines.push(`Inspection: DFT to ISO 19840; no individual reading above ${3 * q.totalDft} \u00B5m (3 \u00D7 NDFT, ISO 12944-5 7.3) unless agreed.`);
+    lines.push("Estimate only: confirm products against the supplier's current data sheets and the system with the supplier.");
+    return lines;
+  }
+
   let lastResult = null;
   function renderResults(t) {
     const q = C.paintQuantities(t.totalArea, state.layers, state.loss);
     const order = orderSummary(q);
     const toOrder = order.reduce((s, e) => s + Math.ceil(e.litres - 1e-9), 0);
-    lastResult = { t, q, order };
+    lastResult = { t, q, order, spec: specLines(q) };
+    $("#spec").textContent = lastResult.spec.join("\n");
     $("#kpis").replaceChildren(
       h("div", { class: "kpi main" }, h("div", { class: "l" }, "Total surface area"), h("div", { class: "v" }, `${nf(t.totalArea)} m²`), h("div", { class: "s" }, t.allowanceArea ? `includes ${nf(+state.allow, 0)}% allowance` : "no allowance added")),
       h("div", { class: "kpi" }, h("div", { class: "l" }, "Pipe"), h("div", { class: "v" }, `${nf(t.pipeArea)} m²`), h("div", { class: "s" }, `${nf(t.pipeLength, 1)} m of pipe`)),
@@ -386,7 +533,7 @@
     fill($("#result-note"),
       h("b", {}, "Order by product (whole litres): "),
       order.map((e, i) => `${i ? " · " : ""}${e.name}: ${nf(Math.ceil(e.litres - 1e-9), 0)} L (${[...new Set(e.roles)].join(" + ")})`),
-      ` — ${state.cat === CUSTOM ? "custom system" : `${state.cat} ${DB.iso12944.durability[state.dur].label.toLowerCase()}`}, ${supplierName(state.supplier)}. `,
+      ` — ${currentSystem() ? sysName(state.systemId) + (isEdited() ? " (edited)" : "") : "own build"}, ${state.env} ${ISO.durability[state.dur].label.toLowerCase()}, ${supplierName(state.supplier)}. `,
       "Litres = area × DFT ÷ (10 × solids %), divided by (1 − loss). Pack sizes are not modelled.");
   }
 
@@ -398,7 +545,7 @@
     const rows = [];
     const add = (...cells) => rows.push(cells.map(csvCell).join(","));
     add("Paint quantity calculation");
-    add("Category", state.cat === CUSTOM ? "Custom" : state.cat, "Durability", state.cat === CUSTOM ? "" : state.dur, "Supplier", supplierName(state.supplier));
+    add("Environment", state.env, "Durability", state.dur, "Substrate", state.substrate, "Supplier", supplierName(state.supplier), "System", state.systemId ? sysName(state.systemId) + (isEdited() ? " (edited)" : "") : "own build");
     add("Application loss %", state.loss, "Area allowance %", state.allow);
     add();
     add("Members"); add("Description", "Qty", "Length (m)", "Area per metre (m2/m)", "Area (m2)", "Mass (kg)");
@@ -412,7 +559,9 @@
     add("Order by product"); add("Product", "Litres (whole)", "Used in");
     order.forEach((e) => add(e.name, Math.ceil(e.litres - 1e-9), [...new Set(e.roles)].join(" + ")));
     add();
-    add("Estimate only. Check product data against the supplier's current data sheet and the system against ISO 12944.");
+    add();
+    add("Specification");
+    lastResult.spec.forEach((line) => add(line));
     const blob = new Blob(["﻿" + rows.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = h("a", { href: URL.createObjectURL(blob), download: "paint-quantities.csv" });
     document.body.append(a); a.click(); a.remove();
@@ -451,26 +600,39 @@
   $("#paste-import").addEventListener("click", importText);
   $("#load-example").addEventListener("click", loadExample);
   $("#clear-all").addEventListener("click", () => { if (!state.lines.length || confirm("Remove every line from the list?")) { state.lines = []; renderMembers(); recalc(); } });
-  catSel.addEventListener("change", onCategory);
+  subSel.addEventListener("change", onSubstrate);
+  envSel.addEventListener("change", onEnv);
   durSel.addEventListener("change", onDurability);
   supSel.addEventListener("change", onSupplier);
   $("#add-layer").addEventListener("click", () => {
     const p = C.pickProduct(state.supplier, "EP", 100);
     const layer = { role: "mid", type: "EP", coats: 1, dft: 100, productId: p ? p.id : "", vs: p ? p.vs : 60 };
-    const last = state.layers[state.layers.length - 1];
-    state.layers.splice(last && last.role === "finish" ? state.layers.length - 1 : state.layers.length, 0, layer);
-    renderLayers(); afterLayerChange();
+    const n = state.layers.length;
+    state.layers.splice(n > 1 ? n - 1 : n, 0, layer);   // before the finish coat
+    relabelRoles(); renderLayers(); afterLayerChange();
   });
-  $("#reset-layers").addEventListener("click", () => { applyDatabaseSystem(); renderLayers(); afterLayerChange(); });
+  $("#reset-layers").addEventListener("click", () => { if (currentSystem()) selectSystem(state.systemId); else autoSelect(); });
+  $("#open-helper").addEventListener("click", () => { updateHelper(); helper.showModal(); $("#h-steel-g").focus(); });
+  $("#helper-close").addEventListener("click", () => helper.close());
+  ["#h-steel-g", "#h-steel-um", "#h-zinc-g", "#h-zinc-um"].forEach((id) => $(id).addEventListener("input", updateHelper));
+  $("#helper-use").addEventListener("click", () => { if (!helperPick) return; envSel.value = helperPick; helper.close(); onEnv(); });
+  $("#copy-spec").addEventListener("click", async () => {
+    const text = $("#spec").textContent;
+    try { await navigator.clipboard.writeText(text); $("#copy-spec").textContent = "Copied"; }
+    catch (e) { const r = document.createRange(); r.selectNodeContents($("#spec")); getSelection().removeAllRanges(); getSelection().addRange(r); $("#copy-spec").textContent = "Selected: press Ctrl+C"; }
+    setTimeout(() => { $("#copy-spec").textContent = "Copy specification"; }, 2000);
+  });
   $("#loss").addEventListener("input", (e) => { state.loss = e.target.value === "" ? 0 : Math.min(90, Math.max(0, parseFloat(e.target.value))); recalc(); });
   $("#allow").addEventListener("input", (e) => { state.allow = e.target.value === "" ? 0 : Math.max(0, parseFloat(e.target.value)); recalc(); });
   $("#export-csv").addEventListener("click", exportCsv);
   $("#print").addEventListener("click", () => { $("#sources").open = true; window.print(); });
 
   // ------------------------------------------------------------------ start
-  fillStaticSelects();
-  catSel.value = state.cat; supSel.value = state.supplier;
-  fillDurability();
+  fillStaticSelects(); fillBands();
+  subSel.value = state.substrate; supSel.value = state.supplier;
+  fillEnvAndDur();
   $("#loss").value = state.loss; $("#allow").value = state.allow;
-  renderEnv(); renderMembers(); renderLayers(); afterLayerChange();
+  renderEnv(); renderMembers();
+  lastArea = C.totals(state.lines, state.allow).totalArea;
+  if (state.layers.length) { renderLayers(); afterLayerChange(); } else autoSelect();
 })();

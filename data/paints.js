@@ -5,10 +5,13 @@
  *   dftMin / dftMax   recommended DFT per coat, micrometres (um)
  * Theoretical coverage (m2/L) = vs x 10 / DFT(um); this is the relationship every data sheet below follows.
  *
- * `type` links a product to a layer in an ISO 12944 system (see iso12944.js):
- *   ZN  zinc-rich primer      EP  epoxy primer / intermediate      PUR  polyurethane finish
+ * `type` links a product to a layer of a paint system (see systems.js) and decides which ISO 12944-5
+ * Annex B column the system is judged under (the primer's type picks the column):
+ *   ZN  zinc-rich primer, Zn (R)   EP  epoxy   PUR  polyurethane finish
+ *   AK  alkyd primer               AY  alkyd / acrylic finish
  * For each supplier the order of products within a type is the order of preference: the first product
  * whose [dftMin, dftMax] contains the specified DFT is chosen by default (the user can change it).
+ * Jotun systems name their own products (systems.js); other suppliers' products are substituted by type.
  *
  * SOURCES AND LIMITS. Supplier sites could not be opened directly while building this database, so the
  * values were collected from search-engine extracts of the technical/product data sheets (TDS/PDS) and
@@ -23,22 +26,60 @@
     layerTypes: {
       ZN: "Zinc-rich primer",
       EP: "Epoxy",
-      PUR: "Polyurethane finish"
+      PUR: "Polyurethane finish",
+      AK: "Alkyd primer",
+      AY: "Alkyd / acrylic finish"
     },
     suppliers: [
       {
         id: "jotun",
         name: "Jotun",
+        short: "Jotun",
         products: [
+          // ---- products named in Jotun's "ISO 12944 Coating Selector, Revision 2" (the systems in systems.js)
+          { id: "jotun-barrier-80", name: "Barrier 80", type: "ZN", chem: "Zinc-rich epoxy (polyamide cured)",
+            vs: 61, dftMin: 50, dftMax: 100,
+            source: "Barrier 80 TDS copies: VS 61 +/-2 % (Barrier 80 S, a different variant, is 67 %). The coating selector specifies it at 50-80 um; listings for the S version give 60-100 um. Confirm the per-coat range on the current TDS." },
+          { id: "jotun-barrier", name: "Barrier", type: "ZN", chem: "Zinc-rich epoxy",
+            vs: 53, dftMin: 60, dftMax: 75,
+            source: "Barrier TDS copies (2015-2016): VS 53 +/-2 %, NORSOK M-501 system 1 prequalified. The 60-75 um range is the film build in Jotun's ISO 12944-9 tested systems, not a TDS range." },
+          { id: "jotun-penguard-hsp-zp", name: "Penguard HSP ZP", type: "EP", chem: "High-build epoxy, zinc phosphate",
+            vs: 73, dftMin: 60, dftMax: 200,
+            source: "Penguard HSP ZP TDS (2021, 2024 copies): VS 73 +/-2 % (ISO 3233). The selector lists it as 'Penguard HSP ZP or Penguard Express ZP'; no solids figure was found for Express ZP. The 60-200 um range is how the selector uses it, not a TDS range." },
+          { id: "jotun-penguard-hb", name: "Penguard HB", type: "EP", chem: "High-build epoxy (primer on galvanized steel)",
+            vs: 54, dftMin: 80, dftMax: 150,
+            source: "Penguard HB TDS (undated Jotun copy): VS 54 +/-2 %, DFT 80-150 um, 6.8-3.6 m2/L." },
+          { id: "jotun-penguard-pro", name: "Penguard Pro", type: "EP", chem: "Epoxy for immersion",
+            vs: 75, dftMin: 100, dftMax: 500,
+            source: "Penguard Pro: VS 75 % DERIVED from a retailer's 7.5-1.5 m2/L at 100-500 um DFT (both ends give 75 %); no TDS solids line was seen." },
+          { id: "jotun-penguard-pro-gf", name: "Penguard Pro GF", type: "EP", chem: "Glass-flake epoxy",
+            vs: 75, dftMin: 175, dftMax: 300,
+            source: "Penguard Pro GF TDS: VS 75 +/-2 % (ISO 3233). 175-300 um is the film build in Jotun's ISO 12944-9 tested systems." },
+          { id: "jotun-penguard-universal", name: "Penguard Universal", type: "EP", chem: "High-build epoxy",
+            vs: 72, dftMin: 75, dftMax: 300,
+            source: "Penguard Universal EPD listing: VS 72 +/-2 %, DFT 75-300 um, 9.6-2.4 m2/L." },
+          { id: "jotun-hardtop-ax", name: "Hardtop AX", type: "PUR", chem: "Aliphatic acrylic polyurethane",
+            vs: 63, dftMin: 50, dftMax: 100,
+            source: "Hardtop AX TDS (Feb 2025, via extracts) and EPD: VS 63 +/-2 %, DFT 50-100 um, 13-6.3 m2/L." },
+          { id: "jotun-pilot-qd-primer", name: "Pilot QD Primer", type: "AK", chem: "Alkyd primer, zinc phosphate",
+            vs: 56, dftMin: 40, dftMax: 125,
+            source: "Pilot QD Primer TDS: VS 56 +/-2 %, DFT 40-125 um (typ. 75), 14-4.5 m2/L." },
+          { id: "jotun-pilot-ii", name: "Pilot II", type: "AY", chem: "Alkyd topcoat",
+            vs: 48, dftMin: 40, dftMax: 60,
+            source: "Pilot II TDS (Mar 2018): VS 48 +/-2 %. The 40-60 um range is how the selector uses it, not a TDS range." },
+          { id: "jotun-pioner-topcoat", name: "Pioner Topcoat", type: "AY", chem: "Acrylic topcoat",
+            vs: 34, dftMin: 40, dftMax: 60,
+            source: "Pioner Topcoat EPD listing: VS 34 +/-2 % (third-party LCA database, not the TDS). The 40-60 um range is how the selector uses it." },
+          // ---- other Jotun products
           { id: "jotun-barrier-77", name: "Barrier 77", type: "ZN", chem: "Zinc-rich epoxy (polyamide cured)",
             vs: 53, dftMin: 25, dftMax: 75, dftTyp: 50,
             source: "Barrier 77 TDS, 2005/2011 issues (distributor copies): VS 53 +/-2 %, 25-75 um (typ. 50). One retailer lists it as discontinued: confirm availability." },
           { id: "jotun-jotamastic-90", name: "Jotamastic 90", type: "EP", chem: "Surface-tolerant epoxy mastic",
             vs: 80, dftMin: 100, dftMax: 300, dftTyp: 125,
-            source: "Jotamastic 90 TDS (distributor copy): VS 80 +/-2 %, DFT 100-300 um, 8-2.7 m2/L. Tested by Norner to ISO 12944-6:2018 under Hardtop XP (C4 High, C5 Very High)." },
+            source: "Jotamastic 90 TDS (distributor copy): VS 80 +/-2 %, DFT 100-300 um, 8-2.7 m2/L; the TDS gives the same figures for the winter grade (WG). Tested by Norner to ISO 12944-6:2018 under Hardtop XP (C4 High, C5 Very High)." },
           { id: "jotun-penguard-express", name: "Penguard Express", type: "EP", chem: "Fast-drying high-solids epoxy",
             vs: 74, dftMin: 75, dftMax: 250, dftTyp: 125,
-            source: "Penguard Express EPD/TDS listing: VS 74 +/-2 %, DFT 75-250 um, 9.9-3 m2/L. Jotun states suitability up to C5; no ISO 12944 system table was seen." },
+            source: "Penguard Express EPD/TDS listing: VS 74 +/-2 %, DFT 75-250 um, 9.9-3 m2/L." },
           { id: "jotun-hardtop-xp", name: "Hardtop XP", type: "PUR", chem: "Aliphatic acrylic polyurethane",
             vs: 63, dftMin: 50, dftMax: 100,
             source: "Hardtop XP TDS (distributor copies): VS 63 +/-2 %, DFT 50-100 um, 12.6-6.3 m2/L." },
@@ -53,6 +94,7 @@
       {
         id: "carboline",
         name: "Carboline (Carboguard / Carbozinc / Carbothane)",
+        short: "Carboline",
         products: [
           { id: "carboline-carbozinc-11", name: "Carbozinc 11", type: "ZN", chem: "Self-curing inorganic zinc silicate",
             vs: 62, dftMin: 50, dftMax: 75,
@@ -77,6 +119,7 @@
       {
         id: "ppg",
         name: "PPG (Sigma / Amercoat)",
+        short: "PPG",
         products: [
           { id: "ppg-sigmazinc-68-gp", name: "Sigmazinc 68 GP", type: "ZN", chem: "Zinc-rich epoxy",
             vs: 68, dftMin: 50, dftMax: 150,

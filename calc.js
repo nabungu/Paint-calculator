@@ -122,25 +122,209 @@
     const ofType = s.products.filter((p) => p.type === type);
     return ofType.find((p) => dft >= p.dftMin && dft <= p.dftMax) || ofType[0] || null;
   }
-  function getSystem(cat, dur) {
-    return db().iso12944.systems.find((s) => s.cat === cat && s.dur === dur) || null;
+  const iso = () => db().iso12944;
+  const durs = () => iso().durabilities;
+  const durIndex = (d) => durs().indexOf(d);
+  function getEnv(id) {
+    return iso().environments.find((e) => e.id === id) || null;
   }
-  /** Durability classes available for a category, in order of increasing durability. */
-  function durabilitiesFor(cat) {
-    return db().iso12944.systems.filter((s) => s.cat === cat).map((s) => s.dur);
-  }
+  /** C1 is painted, if at all, with a C2 system (ISO 12944-5, 5.1). */
+  const tableEnv = (envId) => (envId === "C1" ? "C2" : envId);
+  const usedLayers = (layers) => layers.filter((l) => Math.round(num(l.coats)) > 0 && num(l.dft) > 0);
+  const roleFor = (i, n) => (i === 0 ? "primer" : i === n - 1 ? "finish" : "mid");
 
-  /** Editable layer objects for a category/durability/supplier (cloned from the database plan). */
-  function buildLayers(cat, dur, supplierId) {
-    const sys = getSystem(cat, dur);
-    if (!sys) return [];
-    return sys.layers.map((l) => {
-      const prod = pickProduct(supplierId, l.type, l.dft);
+  // ------------------------------------------------------------------ paint system library (systems.js)
+  /** Library systems for a substrate and environment. */
+  function systemsFor(substrate, envId) {
+    const env = tableEnv(envId);
+    return (db().systems || []).filter((s) => s.substrate === substrate && s.env === env);
+  }
+  function getLibrarySystem(id, substrate, envId) {
+    return systemsFor(substrate, envId).find((s) => s.id === id) || null;
+  }
+  /**
+   * Editable layers for a library system. With the system's own supplier the named product is used; with another
+   * supplier, that supplier's product of the same type is substituted (productId "" when it has none).
+   */
+  function systemLayers(sys, supplierId) {
+    return sys.layers.map((l, i) => {
+      const prod = supplierId === sys.supplier ? getProduct(supplierId, l.products[0]) : pickProduct(supplierId, l.type, l.dft);
       return {
-        role: l.role, type: l.type, coats: l.coats, dft: l.dft,
-        productId: prod ? prod.id : "", vs: prod ? prod.vs : 60
+        role: roleFor(i, sys.layers.length), type: l.type, coats: l.coats, dft: l.dft,
+        productId: prod ? prod.id : "", vs: prod ? prod.vs : "", substituted: supplierId !== sys.supplier
       };
     });
+  }
+
+  // ------------------------------------------------------------------ ISO 12944-5 Annex B compliance
+  /** The Annex B table for a substrate and environment, keyed by durability, or null when none applies. */
+  function requirementsFor(substrate, envId) {
+    const e = getEnv(envId);
+    if (!e || e.kind === "part9") return null;
+    if (e.kind === "imm") return substrate === "carbon" ? iso().minimums.immersion : null;
+    const t = iso().minimums[substrate];
+    return t ? t[tableEnv(envId)] || null : null;
+  }
+  const TABLE = { carbon: "Table B.2", hdg: "Table B.3", tsm: "Table B.4" };
+  /** Which column of the table the build is judged under; decided by the first coat (the primer). */
+  function requirementColumn(layers, substrate, envId) {
+    const primer = usedLayers(layers)[0];
+    const t = primer ? primer.type : "";
+    if (getEnv(envId) && getEnv(envId).kind === "imm")
+      return t === "ZN" ? { table: "Table B.5", cols: ["zn"], label: "zinc-rich primer" }
+        : { table: "Table B.5", cols: ["misc", "single"], label: "other primer, or one product throughout" };
+    if (substrate === "carbon") {
+      const col = t === "ZN" ? "zn" : t === "AK" || t === "AY" ? "akay" : "misc";
+      return { table: TABLE.carbon, cols: [col], label: { zn: "Zn (R) primer", misc: "other primer (EP, PUR, ESI)", akay: "alkyd / acrylic" }[col] };
+    }
+    if (substrate === "hdg") {
+      if (t === "AK") return { table: TABLE.hdg, cols: [], label: "alkyd", reason: "Table B.3 has no alkyd column: alkyds are not used on galvanizing" };
+      const col = t === "AY" ? "ay" : "ep";
+      return { table: TABLE.hdg, cols: [col], label: col === "ay" ? "acrylic" : "EP / PUR primer" };
+    }
+    return { table: TABLE.tsm, cols: ["all"], label: "coats over the sealer" };
+  }
+  /** A CX / Im4 build counts only if it is one of the tested systems in the library (same types, coats and DFTs). */
+  function matchTestedSystem(layers, substrate, envId) {
+    const used = usedLayers(layers);
+    return systemsFor(substrate, envId).find((s) => s.layers.length === used.length &&
+      s.layers.every((l, i) => l.type === used[i].type && l.coats === Math.round(num(used[i].coats)) && l.dft === num(used[i].dft))) || null;
+  }
+
+  /**
+   * Judge a layer build against ISO 12944-5 Annex B (Tables B.2 to B.5).
+   * Returns { applicable, table, column, totalDft, coats, rows: [{ dur, req, alt, met, ok }], achieved, next, reason }.
+   * req is { mnoc, ndft }, "none" (no minimum) or null (no figure). achieved = highest durability allowed:
+   * the highest one whose minimum is met; lower classes follow. next = the first higher class and its shortfall.
+   */
+  function assess(layers, substrate, envId) {
+    const used = usedLayers(layers);
+    const totalDft = used.reduce((s, l) => s + Math.round(num(l.coats)) * num(l.dft), 0);
+    const coats = used.reduce((s, l) => s + Math.round(num(l.coats)), 0);
+    const out = { applicable: false, totalDft, coats, rows: [], achieved: null, next: null };
+    const e = getEnv(envId);
+    if (!e) { out.reason = `Unknown environment ${envId}`; return out; }
+    if (e.kind === "part9") {
+      out.table = "ISO 12944-9";
+      const hit = matchTestedSystem(layers, substrate, envId);
+      out.tested = hit ? hit.id : null;
+      out.achieved = hit ? "H" : null;
+      out.reason = iso().notes.part9;
+      return out;
+    }
+    const reqs = requirementsFor(substrate, envId);
+    if (!reqs) { out.reason = `ISO 12944-5 gives no minimums for ${envId} on ${substrate === "hdg" ? "galvanized steel" : substrate === "tsm" ? "thermal-sprayed metal" : "this substrate"}`; return out; }
+    const col = requirementColumn(layers, substrate, envId);
+    out.table = col.table; out.column = col.label;
+    if (col.reason) { out.reason = col.reason; return out; }
+    if (!used.length) { out.reason = "No coats entered"; return out; }
+    out.applicable = true;
+    const NONE = iso().NONE;
+    const meets = (r) => coats >= r.mnoc && totalDft >= r.ndft;
+    for (const d of durs()) {
+      const cells = col.cols.map((c) => reqs[d][c]);
+      const firm = cells.filter((r) => r && r !== NONE);
+      out.rows.push({ dur: d, req: firm[0] || (cells.includes(NONE) ? NONE : null), alt: firm[1] || null, met: firm.some(meets) });
+    }
+    let top = -1;
+    out.rows.forEach((r, i) => { if (r.met) top = i; });
+    if (top < 0) while (top + 1 < out.rows.length && out.rows[top + 1].req === NONE) top++;   // "no minimum" classes
+    out.rows.forEach((r, i) => { r.ok = i <= top; });
+    out.achieved = top >= 0 ? out.rows[top].dur : null;
+    const nxt = out.rows.slice(top + 1).find((r) => r.req && r.req !== NONE);
+    if (nxt) {
+      const best = [nxt.req, nxt.alt].filter(Boolean).sort((a, b) => a.ndft - b.ndft)[0];
+      out.next = { dur: nxt.dur, req: best, needCoats: Math.max(0, best.mnoc - coats), needDft: Math.max(0, best.ndft - totalDft) };
+    }
+    return out;
+  }
+
+  /** Durability classes a user can ask for in an environment (CX / Im4 have a single class). */
+  function durabilitiesFor(substrate, envId) {
+    const e = getEnv(envId);
+    if (!e) return [];
+    if (e.kind === "part9") return substrate === "carbon" ? ["H"] : [];
+    const reqs = requirementsFor(substrate, envId);
+    if (!reqs) return [];
+    // the classes the table actually sets (a minimum or "no minimum") in at least one column
+    return durs().filter((d) => Object.values(reqs[d]).some((r) => r));
+  }
+
+  /** Product DFT-range and type warnings for a layer set. */
+  function productWarnings(layers, supplierId) {
+    const warnings = [];
+    for (const l of layers) {
+      if (Math.round(num(l.coats)) <= 0) continue;
+      const p = getProduct(supplierId, l.productId);
+      if (!p) { warnings.push(`${supplierName(supplierId)} has no ${(db().paints.layerTypes[l.type] || l.type).toLowerCase()} in the database for this layer`); continue; }
+      const dft = num(l.dft);
+      if (dft < p.dftMin || dft > p.dftMax) warnings.push(`${p.name}: ${dft} \u00B5m per coat is outside its recommended ${p.dftMin}\u2013${p.dftMax} \u00B5m`);
+      if (p.type !== l.type) warnings.push(`${p.name} is a ${db().paints.layerTypes[p.type].toLowerCase()}, not a ${db().paints.layerTypes[l.type].toLowerCase()}`);
+    }
+    return warnings;
+  }
+  const supplierName = (id) => (getSupplier(id) || { name: id }).name;
+  const reqText = (r) => `${r.mnoc} coat${r.mnoc > 1 ? "s" : ""} and ${r.ndft} \u00B5m`;
+
+  /** Every warning for a build: product ranges, zinc primer thickness, and shortfall against the required durability. */
+  function checkLayers(layers, supplierId, { substrate, env: envId, dur }) {
+    const warnings = productWarnings(layers, supplierId);
+    const primer = usedLayers(layers)[0];
+    if (primer && primer.type === "ZN" && (num(primer.dft) < 40 || num(primer.dft) > 80))
+      warnings.push(`Zinc-rich primer at ${num(primer.dft)} \u00B5m: ISO 12944-5 Table A.1 gives 40\u201380 \u00B5m as the usual range`);
+    const a = assess(layers, substrate, envId);
+    if (getEnv(envId) && getEnv(envId).kind === "part9") {
+      if (!a.tested) warnings.push("This build is not one of the tested ISO 12944-9 systems, so its CX / Im4 suitability cannot be checked here");
+    } else if (a.reason && !a.applicable) {
+      warnings.push(a.reason);
+    } else if (dur && (a.achieved === null || durIndex(a.achieved) < durIndex(dur))) {
+      const row = a.rows.find((r) => r.dur === dur);
+      const need = row && row.req && row.req !== iso().NONE ? [row.req, row.alt].filter(Boolean).sort((x, y) => x.ndft - y.ndft)[0] : null;
+      warnings.push(need
+        ? `Falls short of ${dur} durability (${a.table}, ${a.column}): needs at least ${reqText(need)}; this build has ${a.coats} coat${a.coats === 1 ? "" : "s"} and ${a.totalDft} \u00B5m`
+        : `${a.table} has no ${dur} minimum for a ${a.column} build: ${dur} durability is not reachable with this primer type`);
+    }
+    return warnings;
+  }
+
+  /**
+   * Library systems that reach `dur` in the environment, with the supplier's products, least paint first.
+   * Each entry: { system, layers, litres (for area, or per 100 m2 when area is 0), totalDft, coats, missing, warnings }.
+   */
+  function recommend({ substrate, env: envId, dur, supplier, area, lossPct }) {
+    const basis = area > 0 ? area : 100;
+    const out = [];
+    for (const sys of systemsFor(substrate, envId)) {
+      if (dur && durIndex(sys.dur) < durIndex(dur)) continue;
+      const layers = systemLayers(sys, supplier);
+      const q = paintQuantities(basis, layers.map((l) => ({ ...l, vs: l.vs || 100 })), lossPct);
+      out.push({
+        system: sys, layers, litres: q.litres, totalDft: q.totalDft, coats: q.totalCoats,
+        missing: layers.some((l) => !l.productId), warnings: productWarnings(layers, supplier)
+      });
+    }
+    out.sort((a, b) => a.missing - b.missing || a.warnings.length - b.warnings.length || a.litres - b.litres || a.coats - b.coats);
+    return out;
+  }
+
+  /**
+   * Corrosivity category from first-year losses of standard specimens (ISO 12944-2 Table 1).
+   * Give any of steelGm2, steelUm, zincGm2, zincUm; when they disagree the higher category is taken.
+   * Returns { env, byMeasure: { measure: env } } or null; env "beyond CX" above the CX band.
+   */
+  function categoryFromLoss(m) {
+    const cats = iso().environments.filter((e) => e.steelGm2);
+    const byMeasure = {};
+    for (const key of ["steelGm2", "steelUm", "zincGm2", "zincUm"]) {
+      const v = num(m[key], NaN);
+      if (!Number.isFinite(v) || v < 0) continue;
+      const hit = cats.find((e) => (e.id === "C1" ? v <= e[key][1] : v > e[key][0] && v <= e[key][1]));
+      byMeasure[key] = hit ? hit.id : "beyond CX";
+    }
+    const vals = Object.values(byMeasure);
+    if (!vals.length) return null;
+    const rank = (id) => (id === "beyond CX" ? 99 : cats.findIndex((e) => e.id === id));
+    return { env: vals.sort((a, b) => rank(b) - rank(a))[0], byMeasure };
   }
 
   /**
@@ -173,28 +357,6 @@
       theoretical: rows.reduce((s, r) => s + r.theoretical, 0),
       litres: rows.reduce((s, r) => s + r.litres, 0)
     };
-  }
-
-  /** Warnings for a layer set: DFT outside the product's recommended range, total below reference NDFT. */
-  function checkLayers(layers, supplierId, cat, dur) {
-    const warnings = [];
-    for (const l of layers) {
-      const p = getProduct(supplierId, l.productId);
-      const dft = num(l.dft);
-      if (p && num(l.coats) > 0 && (dft < p.dftMin || dft > p.dftMax))
-        warnings.push(`${p.name}: ${dft} µm per coat is outside its recommended ${p.dftMin}–${p.dftMax} µm`);
-      if (p && p.type !== l.type) warnings.push(`${p.name} is a ${db().paints.layerTypes[p.type].toLowerCase()}, not a ${db().paints.layerTypes[l.type].toLowerCase()}`);
-    }
-    const sys = getSystem(cat, dur);
-    const total = layers.reduce((s, l) => s + Math.max(0, Math.round(num(l.coats))) * num(l.dft), 0);
-    if (sys && total < sys.refNdft) warnings.push(`Total ${total} µm is below the ${sys.refNdft} µm reference for ${cat} ${dur}`);
-    if (cat === "CX") {
-      const coats = layers.reduce((s, l) => s + Math.max(0, Math.round(num(l.coats))), 0);
-      if (coats < 3) warnings.push("ISO 12944-9 CX needs at least 3 coats");
-      const zn = layers.find((l) => l.type === "ZN" && num(l.coats) > 0);
-      if (zn && num(zn.dft) < 40) warnings.push("ISO 12944-9: a zinc-rich primer needs at least 40 µm");
-    }
-    return warnings;
   }
 
   // ------------------------------------------------------------------ bulk import
@@ -297,7 +459,9 @@
     findPipe, findFamily, findSection, SECTION,
     pipeExternalPerM, pipeInternalPerM, pipeMassPerM,
     lineMetrics, totals,
-    getSupplier, getProduct, pickProduct, getSystem, durabilitiesFor, buildLayers, paintQuantities, checkLayers,
+    getSupplier, getProduct, pickProduct, paintQuantities,
+    getEnv, systemsFor, getLibrarySystem, systemLayers, requirementsFor, assess, durabilitiesFor,
+    productWarnings, checkLayers, recommend, categoryFromLoss,
     resolvePipe, resolveSection, parseList
   };
 });

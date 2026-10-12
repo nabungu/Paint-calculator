@@ -60,6 +60,7 @@ input[type=number] { text-align: right; }
 select { max-width: 100%; }
 label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
 label.field > :is(input, select) { color: var(--ink); font-weight: 400; font-size: 15px; }
+label.field > span { display: flex; align-items: baseline; flex-wrap: wrap; }
 
 /* ---- tables */
 .tablewrap { overflow-x: auto; }
@@ -96,6 +97,27 @@ tr.err td { background: var(--bad-bg); }
 .notice.warn { background: var(--warn-bg); color: var(--warn-ink); }
 .notice.info { background: var(--accent-soft); }
 .notice ul { margin: 4px 0 0; padding-left: 18px; }
+
+.sub { font-size: 15px; margin: 16px 0 6px; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline; margin-left: 6px; }
+.recs tr.sel td { background: var(--accent-soft); }
+.badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
+.badge.good { background: var(--good); color: #fff; }
+.badge.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.iso { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.iso .head { font-size: 14px; }
+.iso .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.iso .cell { border-radius: 8px; padding: 6px 8px; font-size: 13px; background: var(--panel-2); }
+.iso .cell b { display: block; }
+.iso .cell.ok { background: color-mix(in srgb, var(--good) 16%, var(--panel)); }
+.iso .cell.no { opacity: .75; }
+.iso .next { margin-top: 8px; font-size: 13px; color: var(--muted); }
+details.notes { margin-top: 12px; }
+details.notes summary { cursor: pointer; font-weight: 700; font-size: 14px; }
+details.notes ul { margin: 6px 0; padding-left: 20px; font-size: 14px; }
+pre.spec { white-space: pre-wrap; font: 13px/1.5 var(--f-mono); background: var(--panel-2); border-radius: 8px; padding: 10px 12px; margin: 0; }
+#h-bands td, #h-bands th { padding: 3px 6px; }
+@media (max-width: 760px) { .iso .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* ---- results */
 .kpis { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 14px; }
@@ -152,7 +174,7 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
   <header class="top">
     <div>
       <h1>Paint Quantity Calculator</h1>
-      <p>Surface area of ASME B36.10M pipe and structural steel sections, and the primer, mid coat and finish needed for an ISO 12944 corrosion category. All figures are estimates: check the notes at the bottom before ordering.</p>
+      <p>Surface area of ASME B36.10M pipe and structural steel sections, and the primer, mid coat and finish needed for an ISO 12944 environment and durability. Systems come from Jotun's ISO 12944 Coating Selector and every build is checked against the minimums in ISO 12944-5. All figures are estimates: check the notes at the bottom before ordering.</p>
     </div>
     <div class="hint">Saved in this browser only</div>
   </header>
@@ -181,19 +203,33 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
   </section>
 
   <section class="card" aria-labelledby="h-system">
-    <h2 id="h-system"><span class="step">2</span> Corrosion category and paint system</h2>
+    <h2 id="h-system"><span class="step">2</span> Environment and paint system (ISO 12944)</h2>
     <div class="sysgrid">
-      <label class="field">Corrosivity category (ISO 12944-2)
-        <select id="cat"></select>
+      <label class="field">Substrate
+        <select id="substrate"></select>
       </label>
-      <label class="field">Durability (ISO 12944-1)
+      <label class="field"><span>Environment (ISO 12944-2) <button class="linkbtn" id="open-helper" type="button">Not sure?</button></span>
+        <select id="env"></select>
+      </label>
+      <label class="field">Durability required (ISO 12944-1)
         <select id="dur"></select>
       </label>
       <label class="field">Paint supplier
         <select id="supplier"></select>
       </label>
     </div>
-    <div class="env" id="env"></div>
+    <div class="env" id="env-info"></div>
+
+    <h3 class="sub" id="recs-title">Systems that meet it</h3>
+    <p class="small" id="recs-note" style="margin:0 0 8px"></p>
+    <div class="tablewrap">
+      <table class="stack recs" id="recs">
+        <thead><tr><th>System</th><th>Build (product and µm per coat)</th><th class="r">NDFT / coats</th><th>Rated up to</th><th class="r" id="recs-litres-h">Paint (L)</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h3 class="sub">Selected system <span class="small" id="sel-name"></span></h3>
     <div class="tablewrap">
       <table class="layers stack" id="layers">
         <thead>
@@ -205,11 +241,14 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
     </div>
     <div class="toolbar" style="margin-top:10px">
       <button class="btn" id="add-layer" type="button">+ Add layer</button>
-      <button class="btn ghost" id="reset-layers" type="button">Reset to database system</button>
-      <span class="hint" id="surfprep"></span>
+      <button class="btn ghost" id="reset-layers" type="button">Reset to selected system</button>
     </div>
-    <div class="notice info" id="basis" hidden></div>
+    <div class="iso" id="compliance" aria-live="polite"></div>
     <div class="notice warn" id="warnings" hidden></div>
+    <details class="notes" id="notes">
+      <summary>Surface preparation, inspection and design notes</summary>
+      <div id="notes-body"></div>
+    </details>
   </section>
 
   <section class="card" aria-labelledby="h-allow">
@@ -238,7 +277,10 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
       </table>
     </div>
     <p class="small" id="result-note"></p>
+    <h3 class="sub">Specification summary</h3>
+    <pre class="spec" id="spec"></pre>
     <div class="toolbar noprint" style="margin-top:10px">
+      <button class="btn" id="copy-spec" type="button">Copy specification</button>
       <button class="btn primary" id="export-csv" type="button">Download CSV</button>
       <button class="btn" id="print" type="button">Print</button>
     </div>
@@ -249,10 +291,11 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
     <ul>
       <li><b>Pipe, ASME B36.10M.</b> Outside diameters and wall thicknesses by schedule. Painted area is π × OD per metre of pipe; the optional internal surface and the steel mass use the wall thickness. Fittings, valves and flanges are not in the database: use the area allowance.</li>
       <li><b>Structural steel.</b> The SAISC Red Book is a paid publication and nothing was copied from it. The section ranges are the standard UB/UC (BS 4), IPE/HE (DIN 1025), PFC, UPN (DIN 1026), angle (EN 10056) and hollow-section (EN 10210, EN 10219) series. Surface area per metre is computed from each section's dimensions and checked against published figures. Check a section against the current Red Book or your mill's catalogue if it matters; sections not listed (small tube, tees, flats, plate, welded sections) go in as <i>Custom member</i> with their perimeter.</li>
-      <li><b>Paint products.</b> Volume solids and recommended film thickness come from supplier data-sheet extracts (Jotun, Carboline and PPG). The supplier websites could not be opened directly, so every product carries a note of what was seen (hover the product name). Data sheets change and many products exist in variants: confirm each against the supplier's current data sheet.</li>
-      <li><b>ISO 12944.</b> The standard itself is paid and was not read directly. The category descriptions are the standard's own wording in short; the reference total film thickness for each category/durability has a stated basis (shown under the system table). The layer plans are generic builds that meet that reference with the listed products, <i>not</i> any supplier's certified system. Use the supplier's ISO 12944-6 certificate for a specification. Not covered: C1, immersion (Im1–Im4), low durability for C2/C3, galvanized or metal-sprayed steel.</li>
+      <li><b>ISO 12944.</b> Category bands and examples follow ISO 12944-2 Table 1 and Table 2. Every paint system is checked against the minimum number of coats and minimum NDFT in ISO 12944-5 Annex B (Table B.2 carbon steel, B.3 galvanized, B.4 thermal-sprayed metal, B.5 immersion); the primer decides which column applies. Surface preparation follows Table B.1 and ISO 12944-4, design notes ISO 12944-3. Offshore CX and Im4 are qualified by testing to ISO 12944-9 (not available here), so only Jotun's tested systems are listed for them.</li>
+      <li><b>Systems.</b> The library is Jotun's <i>ISO 12944 Coating Selector, rev. 2</i>: every carbon-steel, galvanized, metal-spray, immersion and offshore system it lists whose products' solids are known. For each one, the durability ISO 12944-5 allows matches the class Jotun ticks; the tests check this for all of them. Choosing Carboline or PPG keeps Jotun's builds but substitutes that supplier's product of the same type: those combinations are not certified by anyone.</li>
+      <li><b>Paint products.</b> Volume solids and recommended film thickness come from supplier data-sheet extracts and distributor copies (the supplier websites could not be opened directly). Every product carries a note of what was seen (hover the product name); a few ranges are taken from how Jotun's selector uses the product, and Penguard Pro's solids are derived from its published spreading rates. Confirm each against the current data sheet.</li>
       <li><b>Arithmetic.</b> Litres = area × DFT ÷ (10 × volume solids %), then ÷ (1 − loss). One coat of 100 µm at 80 % solids covers 8 m²/L theoretically. Wet film = DFT ÷ solids. Quantities are rounded up to whole litres only in the "to order" column; pack sizes are not modelled.</li>
-      <li><b>Not modelled:</b> pack sizes and prices, thinner, mist coats on zinc silicate, over-thickness, shop versus field application, galvanizing.</li>
+      <li><b>Not modelled:</b> pack sizes and prices, thinner, the sealer coat on metal spray, mist coats on zinc silicate, over-thickness, shop versus field application, stripe coats.</li>
     </ul>
   </details>
 </div>
@@ -271,10 +314,28 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
   </div>
 </dialog>
 
+<dialog id="helper-dialog">
+  <h2 style="font-size:17px;margin-bottom:6px">Work out the corrosivity category</h2>
+  <p class="hint" style="margin:0 0 10px">ISO 12944-2 classes a site by the first-year corrosion of standard steel or zinc specimens (ISO 9226). Enter whatever you measured; if steel and zinc disagree the higher category applies. Without measurements, use the typical environments listed for each category: they are only a guide.</p>
+  <div class="sysgrid">
+    <label class="field">Carbon steel loss (g/m²) <input type="number" min="0" step="any" id="h-steel-g" inputmode="decimal"></label>
+    <label class="field">Carbon steel loss (µm) <input type="number" min="0" step="any" id="h-steel-um" inputmode="decimal"></label>
+    <label class="field">Zinc loss (g/m²) <input type="number" min="0" step="any" id="h-zinc-g" inputmode="decimal"></label>
+    <label class="field">Zinc loss (µm) <input type="number" min="0" step="any" id="h-zinc-um" inputmode="decimal"></label>
+  </div>
+  <div class="env" id="h-result" style="margin-top:10px">Enter a measured loss.</div>
+  <div class="tablewrap"><table class="small" id="h-bands"></table></div>
+  <div class="toolbar" style="margin:12px 0 0;justify-content:flex-end">
+    <button class="btn ghost" id="helper-close" type="button">Close</button>
+    <button class="btn primary" id="helper-use" type="button" disabled>Use this category</button>
+  </div>
+</dialog>
+
 <script src="data/pipes.js"></script>
 <script src="data/sections.js"></script>
 <script src="data/paints.js"></script>
 <script src="data/iso12944.js"></script>
+<script src="data/systems.js"></script>
 <script src="calc.js"></script>
 <script src="app.js"></script>
 </body>

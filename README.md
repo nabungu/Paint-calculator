@@ -1,8 +1,9 @@
 # Paint Quantity Calculator
 
-Enter a list of pipes and steel members, pick an ISO 12944 corrosion category and a paint supplier, and get the
-total surface area and the litres of **primer, mid coat and finish** (with the number of coats and film
-thickness of each layer).
+Enter a list of pipes and steel members, pick an ISO 12944 environment and durability, and get the total surface
+area, the paint systems that qualify (from Jotun's *ISO 12944 Coating Selector*), and the litres of **primer, mid coat
+and finish** with the number of coats and film thickness of each layer. Every build, including one you edit, is
+checked live against the minimum requirements of ISO 12944-5.
 
 Open `index.html` in a browser. It is plain HTML, CSS and JavaScript with no build step and no network access, and
 it keeps your list in the browser's `localStorage`.
@@ -12,13 +13,24 @@ it keeps your list in the browser's `localStorage`.
 1. **Members.** Add pipe by NPS/schedule (ASME B36.10M), steel sections (UB, UC, IPE, HEA/HEB/HEM, PFC, UPN,
    equal and unequal angles, SHS/RHS/CHS), or a custom member (flat bar, plate, small tube: type the perimeter).
    You can also paste a list from a spreadsheet (`family, size, length, qty`) or load the example.
-2. **System.** Pick the ISO 12944 category (C2–C5, CX), the durability class and the supplier (Jotun, Carboline,
-   PPG). The primer / mid coat / finish plan, product, coats, dry film thickness (DFT) and volume solids fill in; every
-   figure can be edited, layers can be added, and a *Custom system* option starts from scratch.
+2. **Environment and system.**
+   * Pick the substrate (blast-cleaned carbon steel, hot-dip galvanized, thermal-sprayed metal), the environment
+     (C1–C5 and CX in air; Im1–Im3 in water or soil; Im4) and the durability you need. *Not sure?* works the category
+     out from measured first-year corrosion of steel or zinc specimens (ISO 12944-2 Table 1).
+   * Every Jotun system from the selector that reaches that durability is listed, least paint first, with the litres
+     it needs for your job. *Use* loads it into the layer editor.
+   * Edit anything: products, coats, DFT, solids, add or remove layers. The **ISO 12944-5 check** shows which
+     durability the build allows (low / medium / high / very high, with each minimum) and what is missing for the
+     next class. Warnings flag DFTs outside a product's range and zinc primers outside 40–80 µm.
+   * Choosing Carboline or PPG keeps Jotun's builds and substitutes that supplier's product of the same type (flagged:
+     those combinations are nobody's certified system). Alkyd systems drop out for them (no alkyd products).
+   * Notes give the surface preparation for the substrate and primer (Table B.1, ISO 12944-4), inspection limits and
+     ISO 12944-3 design points.
 3. **Allowances.** Application loss (default 30 %) and extra area for flanges, cleats and fittings.
 4. **Results.** Total, pipe and steel area, steel mass, and for each layer: coats × DFT, wet film, coverage,
-   litres per coat, theoretical litres and litres with loss; plus whole litres to order per product. CSV download and
-   print.
+   litres per coat, theoretical litres and litres with loss; whole litres to order per product; and a
+   **specification summary** (environment, preparation, system, NDFT, ISO compliance, inspection) to copy into a
+   document. CSV download and print.
 
 ## The maths
 
@@ -70,39 +82,53 @@ Not every section here is stocked in Southern Africa, and the Red Book may carry
 slightly. Check any section that matters against the current Red Book or the mill catalogue. Missing sizes
 (small tube below the EN range, tees, flats, plate, welded sections) go in as *Custom member*.
 
+**ISO 12944 (`data/iso12944.js`).** Taken from the standard itself (ISO 12944-2:2017, -3:2017, -4:2017 and
+-5:2018); only figures are used and none of its wording is reproduced.
+
+* Environments: the first-year mass and thickness-loss bands of ISO 12944-2 Table 1 (steel and zinc) and the
+  water/soil categories of Table 2.
+* Minimums: ISO 12944-5 Annex B, Table B.2 (blast-cleaned carbon steel, with separate columns for zinc-rich, other
+  and alkyd/acrylic primers), B.3 (galvanized), B.4 (thermal-sprayed metal) and B.5 (immersion). A build is judged
+  in the column its first coat belongs to; it reaches a durability when it has at least the minimum number of coats
+  and the minimum total NDFT. "No minimum" cells (C2 low, galvanized C2 and C3 low) count as met.
+* C1 uses the C2 table (ISO 12944-5, 5.1). CX and Im4 belong to ISO 12944-9, which qualifies systems by testing; it
+  was not available, so for CX/Im4 only Jotun's tested systems are listed and an edited build cannot be checked.
+
+**Systems (`data/systems.js`).** Jotun's *ISO 12944 Coating Selector, Revision 2*: Tables C.2–C.6 (carbon steel and
+immersion), D.1 (galvanized), E.1 (thermal-sprayed metal) and the ISO 12944-9 table. The durability ticks were read
+from the PDF and confirmed by detecting the tick marks in the rendered pages. **For all 84 systems, the durability that
+ISO 12944-5 Annex B allows equals the durability Jotun ticks** (a test checks this), so the two sources confirm each
+other. Offshore systems are included only where every product's solids are known (2 of 7 zinc-primer CX systems, 1
+splash-zone system, and 2 Im4 systems).
+
 **Paint products (`data/paints.js`).** Volume solids and recommended DFT per coat come from Jotun, Carboline and PPG data
 sheets. **The supplier websites could not be opened while building this**: the figures were collected from
 search-engine extracts of the sheets and from distributor copies. Each product has a `source` note saying what was seen
 (hover the product name in the app). The spreading rates in the sheets all reproduce from the solids (the tests check
-this), which is a good consistency check on the transcription, but data sheets are revised and many products exist in variants
-(Carbothane 134 / HP / HS / HG, Carboguard 893 / SG / MIO). Confirm each product against the supplier's current data sheet.
-Not confirmed: Penguard Express's ISO 12944 system tables, Sigmadur 550 H's own recommended range (50–80 µm is taken
-from PPG's selector rows), and Hardtop AS's current sheet.
+this), but data sheets are revised and many products exist in variants (Barrier 80 is 61 % but Barrier 80 S is 67 %;
+Carbothane 134 / HP / HS / HG). Confirm each product against the supplier's current data sheet. Weaker points:
 
-**ISO 12944 (`data/iso12944.js`).** The standard is paid and was not read directly. Category and durability wording
-follows ISO 12944-1/-2. Each category/durability has a *reference total film thickness* with a stated basis:
+* Penguard Pro's 75 % solids is derived from a retailer's published spreading rates, not read from its data sheet.
+* Pioner Topcoat's 34 % comes from an EPD listing.
+* Several per-coat ranges (Barrier 80, Barrier, Penguard HSP ZP, Pilot II, Pioner, Penguard Pro GF) are the range
+  Jotun's selector uses, because the data sheet range was not seen.
+* The selector allows "Penguard HSP ZP or Penguard Express ZP"; only HSP ZP's solids (73 %) were found, so it is used.
 
-* C2–C4: minimum NDFT for epoxy/PUR/zinc-silicate systems, as reported in secondary summaries of ISO 12944-5 Annex B
-  (Table B.2). Not verified against the standard. C4 High = 240 µm is consistent with supplier-tested systems from Jotun
-  and International.
-* C5: **indicative only** (240 / 320 / 360 µm for Medium / High / Very high). No verified Annex B figure was available;
-  these come from supplier systems (260–360 µm) and Hempel's FAQ (C5 Very High = 320 µm), rounded up on purpose.
-* CX: ISO 12944-9: ≥ 280 µm, ≥ 3 coats, zinc-rich primer ≥ 40 µm. CX has one durability class (High).
-
-The layer plans (for example C4 High: zinc-rich epoxy 60 µm + epoxy 125 µm + polyurethane 60 µm) are **generic builds**
-chosen to meet the reference thickness with each coat inside the products' recommended range. They are **not any
-supplier's certified ISO 12944-6 system**. For a specification, use the supplier's certificate. Not covered: C1,
-immersion (Im1–Im4), low durability for C2/C3, galvanized or metal-sprayed steel, stripe coats, pack sizes, prices.
+Not covered: galvanized or metal-sprayed steel in immersion, CX on galvanizing, the sealer coat on metal spray,
+stripe coats, pack sizes, prices.
 
 ## Editing the database
 
 Everything is data in `data/*.js`; the app and tests pick up changes automatically.
 
-* **Add or correct a product:** add an object to the supplier in `data/paints.js` (`type` is `ZN`, `EP` or `PUR`;
-  keep the `source` note honest). Order within a type is the order of preference.
-* **Add a supplier:** add a `{ id, name, products }` entry; `npm test` will fail if any ISO system has no product whose
-  range contains the specified DFT.
-* **Change a system:** edit `systems` in `data/iso12944.js` (`layers` are `[role, type, coats, dft]`).
+* **Add or correct a product:** add an object to the supplier in `data/paints.js` (`type` is `ZN`, `EP`, `PUR`, `AK`
+  or `AY`; keep the `source` note honest). Order within a type is the order of preference when products are
+  substituted.
+* **Add a supplier:** add a `{ id, name, short, products }` entry; it appears in the supplier list and is substituted
+  into the library's builds by type.
+* **Add a system:** add an entry to `data/systems.js` with the durability its maker rates it for. `npm test` fails if
+  ISO 12944-5 Annex B would allow a different durability, if a product is missing, or if a DFT is outside the
+  product's range.
 * **Regenerate pipe and section tables:** `tools/build_data.py` (see its docstring; it needs the `fluids` and
   `steelsnakes` wheels unpacked).
 
@@ -112,6 +138,7 @@ Everything is data in `data/*.js`; the app and tests pick up changes automatical
 npm test        # node:test, no dependencies
 ```
 
-They check the pipe tables against B36.10M values, section areas against published values and against the geometry,
-every product's spreading rate against its data sheet, that every ISO system × supplier resolves to products that
-accept the specified film thickness, the import parser, and an end-to-end job recomputed independently.
+They check the pipe tables against B36.10M values; section areas against published values and against the geometry;
+every product's spreading rate against its data sheet; the Annex B tables (spot values, and that minimums never fall as
+durability rises); every Jotun system against those tables; the compliance engine's columns, shortfalls and edge
+cases; the recommender; the category helper; the import parser; and an end-to-end job recomputed independently.
