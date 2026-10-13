@@ -27,7 +27,7 @@
   const S = (id, substrate, env, dur, layers, extra) => ({ id, supplier: "jotun", substrate, env, dur, layers, ...extra });
   const carbon = (id, env, dur, layers) => S(id, "carbon", env, dur, layers, { table: `Table C.${env.slice(1)}` });
 
-  root.PaintDB.systems = [
+  (root.PaintDB.systems = root.PaintDB.systems || []).push(
     // ---- Table C.2, carbon steel, C2
     carbon("C2.01", "C2", "L", [AK(40), TC(40)]),
     carbon("C2.02", "C2", "M", [AK(60), TC(40)]),
@@ -119,5 +119,5 @@
       [L("EP", 1, 300, ["jotun-penguard-pro-gf"]), L("EP", 1, 300, ["jotun-penguard-pro-gf"])], { table: "ISO 12944-9", note: "Also tested for CX offshore and splash and tidal zones." }),
     S("3400-15-022579 Mt13 Rev. A", "carbon", "Im4", "H",
       [L("EP", 1, 175, ["jotun-penguard-pro-gf"]), L("EP", 1, 175, ["jotun-penguard-pro-gf"])], { table: "ISO 12944-9" })
-  ];
+  );
 })(typeof globalThis !== "undefined" ? globalThis : window);

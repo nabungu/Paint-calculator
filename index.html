@@ -3,30 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Paint Quantity Calculator</title>
+<title>Paint &amp; Galvanizing Calculator</title>
 <meta name="description" content="Surface area and ISO 12944 paint quantities (primer, mid coat, finish) for ASME B36.10M pipe and structural steel sections.">
 <style>
 :root {
-  --bg: #f4f6f9; --panel: #ffffff; --panel-2: #eef2f7; --ink: #15202e; --muted: #5a6779; --line: #d8dfe9;
-  --accent: #1d5fd1; --accent-ink: #ffffff; --accent-soft: #e4edfb;
-  --good: #187a4b; --warn-bg: #fff4dc; --warn-ink: #7a4a00; --bad: #b3261e; --bad-bg: #fde8e6;
-  --shadow: 0 1px 2px rgba(20, 32, 46, .06), 0 4px 14px rgba(20, 32, 46, .06);
-  --f-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* EPCM Holdings palette: navy wordmark and the cyan-to-green "m" */
+  --navy: #0b1d35; --cyan: #19b0cb; --teal: #3fc593; --green: #67c549;
+  --grad: linear-gradient(90deg, var(--cyan) 0%, var(--teal) 55%, var(--green) 100%);
+  --bg: #f2f5f8; --panel: #ffffff; --panel-2: #eff3f7; --ink: #0b1d35; --muted: #566579; --line: #dce3eb;
+  --accent: #0b1d35; --accent-ink: #ffffff; --accent-hover: #17345c; --accent-soft: #e2f5f3;
+  --link: #0b7f92; --focus: #19b0cb;
+  --good: #1d8a4a; --warn-bg: #fff4dc; --warn-ink: #7a4a00; --bad: #b3261e; --bad-bg: #fde8e6;
+  --shadow: 0 1px 2px rgba(11, 29, 53, .05), 0 6px 18px rgba(11, 29, 53, .06);
+  --header: #ffffff; --logo-chip: transparent;
+  --f-body: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
   --f-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f151e; --panel: #172030; --panel-2: #1e2a3d; --ink: #e6edf7; --muted: #9aa8bd; --line: #2b3a52;
-    --accent: #6ea0ff; --accent-ink: #0b1220; --accent-soft: #1f3150;
-    --good: #4cc98d; --warn-bg: #3a2e12; --warn-ink: #f0c36a; --bad: #ff8a80; --bad-bg: #3d1e1c;
-    --shadow: none; color-scheme: dark;
+    --bg: #06111f; --panel: #0d1d33; --panel-2: #132842; --ink: #e7eef6; --muted: #9eb0c5; --line: #22395a;
+    --accent: #3fc593; --accent-ink: #06111f; --accent-hover: #67c549; --accent-soft: #123b3f;
+    --link: #5fd0e2; --focus: #5fd0e2;
+    --good: #5fd08a; --warn-bg: #3a2e12; --warn-ink: #f0c36a; --bad: #ff8a80; --bad-bg: #3d1e1c;
+    --shadow: none; --header: #0d1d33; --logo-chip: #ffffff; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f151e; --panel: #172030; --panel-2: #1e2a3d; --ink: #e6edf7; --muted: #9aa8bd; --line: #2b3a52;
-  --accent: #6ea0ff; --accent-ink: #0b1220; --accent-soft: #1f3150;
-  --good: #4cc98d; --warn-bg: #3a2e12; --warn-ink: #f0c36a; --bad: #ff8a80; --bad-bg: #3d1e1c;
-  --shadow: none; color-scheme: dark;
+  --bg: #06111f; --panel: #0d1d33; --panel-2: #132842; --ink: #e7eef6; --muted: #9eb0c5; --line: #22395a;
+  --accent: #3fc593; --accent-ink: #06111f; --accent-hover: #67c549; --accent-soft: #123b3f;
+  --link: #5fd0e2; --focus: #5fd0e2;
+  --good: #5fd08a; --warn-bg: #3a2e12; --warn-ink: #f0c36a; --bad: #ff8a80; --bad-bg: #3d1e1c;
+  --shadow: none; --header: #0d1d33; --logo-chip: #ffffff; color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -35,27 +42,44 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(
 h1, h2, h3 { margin: 0; line-height: 1.2; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+a { color: var(--link); }
 
 .wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px 48px; }
-header.top { padding: 22px 0 14px; display: flex; gap: 12px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; }
-header.top h1 { font-size: 24px; letter-spacing: -.01em; }
-header.top p { margin: 4px 0 0; color: var(--muted); max-width: 70ch; }
+/* ---- brand header */
+.brandbar { background: var(--header); border-bottom: 1px solid var(--line); position: relative; }
+.brandbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 4px; background: var(--grad); }
+.brandrow { max-width: 1180px; margin: 0 auto; padding: 14px 16px 16px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.logo { height: 40px; width: auto; display: block; background: var(--logo-chip); border-radius: 8px; padding: 2px 4px; }
+.brandrow .titles { border-left: 1px solid var(--line); padding-left: 18px; min-width: 0; flex: 1; }
+.brandrow h1 { font-size: 21px; letter-spacing: -.01em; font-weight: 700; }
+.brandrow .tag { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.brandrow .hint { margin-left: auto; }
+.stepnav { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 0; }
+.stepnav a { text-decoration: none; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px 5px 5px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 7px; }
+.stepnav a:hover { border-color: var(--teal); }
+.stepnav a .step { width: 22px; height: 22px; font-size: 12px; }
+header.top { padding: 16px 0 0; }
+header.top p { margin: 0; color: var(--muted); max-width: 95ch; font-size: 14px; }
+footer.foot { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+@media (max-width: 760px) { .brandrow { gap: 10px 14px; } .brandrow .titles { border-left: 0; padding-left: 0; flex-basis: 100%; order: 3; } .brandrow .hint { margin-left: auto; font-size: 12px; } .logo { height: 34px; } }
 
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 16px; margin-top: 16px; }
-.card > h2 { font-size: 17px; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-.step { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 13px; font-weight: 700; flex: none; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 18px 20px; margin-top: 18px; scroll-margin-top: 12px; }
+.card > h2 { font-size: 18px; display: flex; align-items: center; gap: 11px; margin: -2px 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.step { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--grad); color: #06111f; font-size: 13px; font-weight: 800; flex: none; }
 .hint { color: var(--muted); font-size: 13px; }
 
-.btn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; font-weight: 600; font-size: 14px; }
-.btn:hover { border-color: var(--accent); }
+.btn { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 13px; font-weight: 600; font-size: 14px; transition: border-color .15s, background .15s; }
+.btn:hover { border-color: var(--teal); }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn.ghost { background: transparent; }
 .btn.icon { padding: 4px 9px; line-height: 1; font-size: 18px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
 .toolbar .spacer { flex: 1; }
 
-input, select, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; min-width: 0; }
+input, select, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; min-width: 0; }
+input:hover, select:hover, textarea:hover { border-color: color-mix(in srgb, var(--teal) 55%, var(--line)); }
 input[type=number] { text-align: right; }
 select { max-width: 100%; }
 label.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
@@ -65,8 +89,10 @@ label.field > span { display: flex; align-items: baseline; flex-wrap: wrap; }
 /* ---- tables */
 .tablewrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; }
-th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 700; padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: bottom; }
-td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { text-align: left; font-size: 12px; letter-spacing: .01em; color: var(--muted); font-weight: 700; padding: 8px 7px; background: var(--panel-2); border-bottom: 1px solid var(--line); vertical-align: bottom; }
+th:first-child { border-top-left-radius: 8px; } th:last-child { border-top-right-radius: 8px; }
+td { padding: 6px 7px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tbody tr:hover td { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
 th.r, td.r { text-align: right; }
 #members th, #layers th { white-space: nowrap; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -91,7 +117,7 @@ tr.err td { background: var(--bad-bg); }
 .sysgrid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 10px; }
 label.check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; margin: 0 0 8px; cursor: pointer; }
 label.check input { margin-top: 3px; }
-.env { background: var(--panel-2); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 12px; }
+.env { background: var(--panel-2); border-left: 4px solid var(--teal); border-radius: 8px; padding: 10px 14px; font-size: 14px; margin-bottom: 12px; }
 .env b { font-weight: 700; }
 .env div + div { margin-top: 3px; }
 .layers td select { width: 100%; min-width: 150px; }
@@ -101,13 +127,15 @@ label.check input { margin-top: 3px; }
 .notice.info { background: var(--accent-soft); }
 .notice ul { margin: 4px 0 0; padding-left: 18px; }
 
-.sub { font-size: 15px; margin: 16px 0 6px; }
-.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline; margin-left: 6px; }
+.sub { font-size: 15px; margin: 20px 0 8px; display: flex; align-items: baseline; gap: 6px; }
+.sub::before { content: ""; width: 4px; height: 14px; border-radius: 2px; background: var(--grad); align-self: center; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--link); font: inherit; font-weight: 600; text-decoration: underline; margin-left: 6px; }
 .recs tr.sel td { background: var(--accent-soft); }
 .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
 .badge.good { background: var(--good); color: #fff; }
+.badge.info { background: var(--accent-soft); color: var(--ink); }
 .badge.warn { background: var(--warn-bg); color: var(--warn-ink); }
-.iso { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.iso { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--panel); }
 .iso .head { font-size: 14px; }
 .iso .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
 .iso .cell { border-radius: 8px; padding: 6px 8px; font-size: 13px; background: var(--panel-2); }
@@ -124,11 +152,12 @@ pre.spec { white-space: pre-wrap; font: 13px/1.5 var(--f-mono); background: var(
 
 /* ---- results */
 .kpis { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 14px; }
-.kpi { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; }
+.kpi { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; position: relative; overflow: hidden; }
 .kpi .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
 .kpi .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .kpi .s { font-size: 12px; color: var(--muted); }
-.kpi.main { background: var(--accent); color: var(--accent-ink); }
+.kpi.main { background: var(--navy); color: #fff; border-color: var(--navy); }
+.kpi.main::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: var(--grad); }
 .kpi.main .l, .kpi.main .s { color: inherit; opacity: .85; }
 td.strong { font-weight: 700; }
 .small { font-size: 13px; color: var(--muted); }
@@ -167,7 +196,8 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
 
 @media print {
   body { background: #fff; color: #000; font-size: 12px; }
-  .toolbar, .btn, header.top .hint, details.sources:not([open]), .noprint, .members td.act, .members th.act { display: none !important; }
+  .toolbar, .btn, .brandrow .hint, .stepnav, details.sources:not([open]), .noprint, .members td.act, .members th.act { display: none !important; }
+  .brandbar { background: #fff; }
   .card { box-shadow: none; border-color: #bbb; break-inside: avoid; }
   input, select { border: 0; background: transparent; appearance: none; -webkit-appearance: none; padding: 0; }
   .kpi.main { background: #eee; color: #000; }
@@ -175,13 +205,25 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
-    <div>
-      <h1>Paint Quantity Calculator</h1>
-      <p>Surface area of ASME B36.10M pipe and structural steel sections, and the primer, mid coat and finish needed for an ISO 12944 environment and durability. Systems come from Jotun's ISO 12944 Coating Selector and every build is checked against the minimums in ISO 12944-5. For hot-dip galvanizing it checks the coating against ISO 1461 and gives the zinc mass, the weight added to each piece and the life to first maintenance (ISO 14713-1). All figures are estimates: check the notes at the bottom before ordering.</p>
+<header class="brandbar">
+  <div class="brandrow">
+    <img class="logo" src="assets/epcm-logo.png" alt="EPCM" width="120" height="40">
+    <div class="titles">
+      <h1>Paint &amp; Galvanizing Calculator</h1>
+      <p class="tag">Surface area · ISO 12944 paint systems · ISO 1461 hot-dip galvanizing</p>
     </div>
     <div class="hint">Saved in this browser only</div>
+  </div>
+</header>
+<div class="wrap">
+  <header class="top">
+    <p>Surface area of ASME B36.10M pipe and SAISC, EN and AISC steel sections, and the primer, mid coat and finish needed for an ISO 12944 environment and durability, from Jotun, Hempel and PPG's own ISO 12944 systems, each checked against the minimums in ISO 12944-5. For hot-dip galvanizing it checks the coating against ISO 1461 and gives the zinc mass, the weight added to each piece and the life to first maintenance (ISO 14713-1). All figures are estimates: check the notes at the bottom before ordering.</p>
+    <nav class="stepnav" aria-label="Steps">
+      <a href="#h-members"><span class="step">1</span>Members</a>
+      <a href="#h-system"><span class="step">2</span>Protection</a>
+      <a href="#h-allow"><span class="step">3</span>Allowances</a>
+      <a href="#h-results"><span class="step">4</span>Results</a>
+    </nav>
   </header>
 
   <section class="card" aria-labelledby="h-members">
@@ -346,6 +388,10 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
       <li><b>Not modelled:</b> pack sizes and prices, thinner, the sealer coat on metal spray, mist coats on zinc silicate, over-thickness, shop versus field application, stripe coats.</li>
     </ul>
   </details>
+  <footer class="foot">
+    <span>EPCM Holdings · Paint &amp; Galvanizing Calculator</span>
+    <span>Estimates only: confirm systems, products and quantities with the supplier before ordering.</span>
+  </footer>
 </div>
 
 <dialog id="paste-dialog">

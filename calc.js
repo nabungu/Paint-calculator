@@ -166,11 +166,13 @@
   const roleFor = (i, n) => (i === 0 ? "primer" : i === n - 1 ? "finish" : "mid");
 
   // ------------------------------------------------------------------ paint system library (systems.js)
-  /** Library systems for a substrate and environment. */
-  function systemsFor(substrate, envId) {
+  /** Library systems for a substrate and environment, optionally one supplier's only. */
+  function systemsFor(substrate, envId, supplierId) {
     const env = tableEnv(envId);
-    return (db().systems || []).filter((s) => s.substrate === substrate && s.env === env);
+    return (db().systems || []).filter((s) => s.substrate === substrate && s.env === env && (!supplierId || s.supplier === supplierId));
   }
+  /** Suppliers with their own systems in the library. */
+  const systemSuppliers = () => [...new Set((db().systems || []).map((s) => s.supplier))];
   function getLibrarySystem(id, substrate, envId) {
     return systemsFor(substrate, envId).find((s) => s.id === id) || null;
   }
@@ -240,6 +242,7 @@
       out.table = "ISO 12944-9";
       const hit = matchTestedSystem(layers, substrate, envId);
       out.tested = hit ? hit.id : null;
+      out.testedBy = hit ? hit.supplier : null;
       out.achieved = hit ? "H" : null;
       out.reason = iso().notes.part9;
       return out;
@@ -324,19 +327,27 @@
    * Library systems that reach `dur` in the environment, with the supplier's products, least paint first.
    * Each entry: { system, layers, litres (for area, or per 100 m2 when area is 0), totalDft, coats, missing, warnings }.
    */
+  /**
+   * Systems that reach a durability, least paint first. A supplier with systems of its own for the environment gets
+   * those; one without (or with none for this case) gets Jotun's builds with its own products substituted by type.
+   */
   function recommend({ substrate, env: envId, dur, supplier, area, lossPct }) {
     const basis = area > 0 ? area : 100;
     const out = [];
-    for (const sys of systemsFor(substrate, envId)) {
+    const own = systemsFor(substrate, envId, supplier).filter((s) => !dur || durIndex(s.dur) >= durIndex(dur));
+    const pool = own.length ? own : systemsFor(substrate, envId, "jotun");
+    for (const sys of pool) {
       if (dur && durIndex(sys.dur) < durIndex(dur)) continue;
       const layers = systemLayers(sys, supplier);
       const q = paintQuantities(basis, layers.map((l) => ({ ...l, vs: l.vs || 100 })), lossPct);
       out.push({
         system: sys, layers, litres: q.litres, totalDft: q.totalDft, coats: q.totalCoats,
-        missing: layers.some((l) => !l.productId), warnings: productWarnings(layers, supplier)
+        missing: layers.some((l) => !l.productId), warnings: productWarnings(layers, supplier),
+        substituted: sys.supplier !== supplier, tested: sys.basis === "tested"
       });
     }
-    out.sort((a, b) => a.missing - b.missing || a.warnings.length - b.warnings.length || a.litres - b.litres || a.coats - b.coats);
+    // systems that meet the Annex B minimums before those rated on test results alone
+    out.sort((a, b) => a.missing - b.missing || a.warnings.length - b.warnings.length || a.tested - b.tested || a.litres - b.litres || a.coats - b.coats);
     return out;
   }
 
@@ -672,7 +683,7 @@
     lineMetrics, totals,
     getSupplier, getProduct, pickProduct, paintQuantities,
     getEnv, systemsFor, getLibrarySystem, systemLayers, requirementsFor, assess, durabilitiesFor,
-    productWarnings, checkLayers, recommend, categoryFromLoss,
+    productWarnings, checkLayers, recommend, categoryFromLoss, systemSuppliers,
     galvBand, bandForThickness, elementThickness, galvCheck, zincLife, lifeText, lifeMeets, zincQuantities, galvAreaPerM, galvArea, pieceWeights,
     resolvePipe, resolveSection, normSize, parseList
   };

@@ -28,7 +28,9 @@
       EP: "Epoxy",
       PUR: "Polyurethane finish",
       AK: "Alkyd primer",
-      AY: "Alkyd / acrylic finish"
+      AY: "Alkyd / acrylic finish",
+      PS: "Polysiloxane finish",
+      PA: "Polyaspartic finish"
     },
     suppliers: [
       {

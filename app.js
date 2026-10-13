@@ -314,16 +314,25 @@
   }
 
   // ---- qualifying systems
+  // where each supplier's systems come from (data/systems*.js)
+  const SYSTEM_SOURCE = {
+    jotun: "Jotun's ISO 12944 Coating Selector (rev. 2)",
+    hempel: "Hempel's guide \u201CHow to select the right paint system\u201D (ISO 12944, Oct 2023)",
+    ppg: "PPG's ISO 12944 global system selector (2023)"
+  };
+  const supplierOf = (sys) => supplierShort(sys.supplier) || sys.supplier;
   let lastArea = 0;
   function renderRecs() {
     const recs = C.recommend({ substrate: state.substrate, env: state.env, dur: state.dur, supplier: state.supplier, area: lastArea, lossPct: state.loss });
     const sub = ISO.substrates.find((x) => x.id === state.substrate);
     $("#recs-title").textContent = `Systems that meet ${state.env} ${ISO.durability[state.dur].label.toLowerCase()} on ${sub.name.split(" (")[0].toLowerCase()}: ${recs.length}`;
     $("#recs-litres-h").textContent = lastArea > 0 ? "Paint for this job (L)" : "Paint per 100 m² (L)";
+    const sub0 = recs.length && recs[0].substituted, src = recs.length ? recs[0].system.supplier : state.supplier;
     fill($("#recs-note"),
-      "From Jotun's ISO 12944 Coating Selector (rev. 2), sorted by least paint. ",
-      state.supplier === "jotun" ? "" : `With ${supplierShort(state.supplier)} selected, Jotun's builds are shown with ${supplierShort(state.supplier)} products of the same type: they are not ${supplierShort(state.supplier)}-certified systems. `,
-      C.getEnv(state.env).kind === "part9" ? "CX and Im4 systems are Jotun's ISO 12944-9 tested systems." : "");
+      `From ${SYSTEM_SOURCE[src] || supplierShort(src) + "'s systems"}, sorted by least paint. `,
+      sub0 ? `${supplierShort(state.supplier)} has no systems of its own here in the library, so Jotun's builds are shown with ${supplierShort(state.supplier)} products of the same type: they are not ${supplierShort(state.supplier)}-certified systems. ` : "",
+      recs.some((r) => r.tested) ? "Systems marked \u201Ctested\u201D are rated by the supplier from ISO 12944-6 / -9 performance tests and fall short of the ISO 12944-5 Annex B minimum coats or thickness. " : "",
+      C.getEnv(state.env).kind === "part9" ? `CX and Im4 systems are ${supplierShort(src)}'s ISO 12944-9 tested systems.` : "");
     const body = $("#recs tbody");
     if (!recs.length) {
       fill(body, h("tr", {}, h("td", { colspan: 6, class: "empty" }, "No system in the library for this combination. Build your own layers below; the ISO check still works.")));
@@ -335,6 +344,7 @@
       return h("tr", { class: id === state.systemId ? "sel" : "" },
         h("td", { dataset: { label: "System" } }, h("div", {}, h("b", {}, sysName(id)),
           r === best ? h("span", { class: "badge good" }, "least paint") : null,
+          r.tested && C.getEnv(state.env).kind !== "part9" ? h("span", { class: "badge info", title: "Rated by the supplier from performance tests (ISO 12944-6); below the ISO 12944-5 Annex B minimums" }, "tested") : null,
           r.missing ? h("span", { class: "badge warn" }, "no product for a layer") : r.warnings.length ? h("span", { class: "badge warn", title: r.warnings.join("\n") }, "check DFT ranges") : null,
           h("div", { class: "small" }, r.system.table + (r.system.note ? ` · ${r.system.note}` : "")))),
         h("td", { dataset: { label: "Build" } }, r.layers.map((l) => `${prodName(l.productId)} ${l.coats > 1 ? l.coats + " × " : ""}${l.dft}`).join(" + ")),
@@ -436,14 +446,17 @@
     const el = $("#compliance");
     if (a.table === "ISO 12944-9") {
       fill(el, h("div", { class: "head" }, a.tested
-        ? [h("b", {}, "✓ Tested system. "), `This build matches Jotun's ISO 12944-9 system ${a.tested}.`]
+        ? [h("b", {}, "✓ Tested system. "), `This build matches ${supplierShort(a.testedBy)}'s ISO 12944-9 system ${a.tested}.`]
         : [h("b", {}, "Not a tested system. "), "This build does not match any ISO 12944-9 system in the library."]),
       h("div", { class: "next" }, ISO.notes.part9));
       return a;
     }
     if (!a.applicable) { fill(el, h("div", { class: "head" }, h("b", {}, "ISO 12944-5 check: "), a.reason || "not applicable")); return a; }
     const want = ISO.durabilities.indexOf(state.dur), got = a.achieved ? ISO.durabilities.indexOf(a.achieved) : -1;
+    const sys = currentSystem(), testedPick = sys && sys.basis === "tested" && !isEdited();
     fill(el,
+      testedPick ? h("div", { class: "head", style: "margin-bottom:6px" }, h("b", {}, `Rated ${ISO.durability[sys.dur].label.toLowerCase()} by ${supplierOf(sys)} from performance testing. `),
+        `${sysName(sys.id)} is the supplier's tested system (ISO 12944-6); its rating does not come from the ISO 12944-5 minimum-thickness tables below.`) : null,
       h("div", { class: "head" }, h("b", {}, got >= want ? "✓ Meets " : "✗ Does not meet "),
         h("b", {}, `${state.env} ${ISO.durability[state.dur].label.toLowerCase()}. `),
         `ISO 12944-5 ${a.table}, ${a.column} column: this build is ${a.coats} coat${a.coats === 1 ? "" : "s"} and ${a.totalDft} µm, `,
@@ -594,11 +607,11 @@
       `Substrate: ${sub.name}.`,
       ...(z ? galvSpecLines(z) : []),
       `Surface preparation: ${prep}`,
-      `Paint system: ${sys ? `Jotun ${sysName(sys.id)}${state.supplier === "jotun" ? "" : `, with ${supplierShort(state.supplier)} products substituted`}${isEdited() ? " (edited)" : ""}` : "own build"}`
+      `Paint system: ${sys ? `${supplierOf(sys)} ${sysName(sys.id)}${state.supplier === sys.supplier ? "" : `, with ${supplierShort(state.supplier)} products substituted`}${isEdited() ? " (edited)" : ""}` : "own build"}${sys && sys.basis === "tested" && !isEdited() ? ` (rated ${ISO.durability[sys.dur].label.toLowerCase()} by ${supplierOf(sys)} from ISO 12944-6 performance testing)` : ""}`
     ];
     q.rows.filter((r) => r.coats > 0).forEach((r) => lines.push(`  ${ROLE[r.role] || "Layer"}: ${prodName(r.productId)}, ${r.coats} \u00D7 ${r.dft} \u00B5m DFT`));
     lines.push(`Total NDFT ${q.totalDft} \u00B5m in ${q.totalCoats} coat${q.totalCoats === 1 ? "" : "s"}.`);
-    if (a.table === "ISO 12944-9") lines.push(a.tested ? `Tested to ISO 12944-9 (Jotun report ${a.tested}).` : "Not a tested ISO 12944-9 system: confirm suitability with the paint maker.");
+    if (a.table === "ISO 12944-9") lines.push(a.tested ? `Tested to ISO 12944-9 (${supplierShort(a.testedBy)} system ${a.tested}).` : "Not a tested ISO 12944-9 system: confirm suitability with the paint maker.");
     else if (a.applicable) lines.push(a.achieved
       ? `Meets ISO 12944-5 ${a.table} (${a.column}) up to ${ISO.durability[a.achieved].label.toLowerCase()} durability${ISO.durabilities.indexOf(a.achieved) < ISO.durabilities.indexOf(state.dur) ? ` \u2014 BELOW the required ${ISO.durability[state.dur].label.toLowerCase()}` : ""}.`
       : `Does not meet the ISO 12944-5 ${a.table} minimums.`);
@@ -646,7 +659,7 @@
       lastResult = { t, z, spec: specLines(null, z) };
       $("#spec").textContent = lastResult.spec.join("\n");
       const l = z.life;
-      $("#kpis").replaceChildren(
+      fill($("#kpis"),
         h("div", { class: "kpi main" }, h("div", { class: "l" }, "Total surface area"), h("div", { class: "v" }, `${nf(t.totalArea)} m²`), h("div", { class: "s" }, t.allowanceArea ? `includes ${nf(+state.allow, 0)}% allowance` : "outside surfaces")),
         h("div", { class: "kpi" }, h("div", { class: "l" }, "Zinc coating"), h("div", { class: "v" }, `${nf(z.um, 0)} µm`), h("div", { class: "s" }, `${nf(z.zinc.gm2, 0)} g/m² · ${z.check.ok ? "meets" : "below"} ISO 1461`)),
         h("div", { class: "kpi" }, h("div", { class: "l" }, "Zinc"), h("div", { class: "v" }, `${nf(z.zinc.kg, 0)} kg`), h("div", { class: "s" }, z.zinc.pctOfSteel !== null ? `adds ${nf(z.zinc.pctOfSteel, 1)}% to the steel` : `${nf(z.area.total)} m² galvanized`)),
@@ -658,7 +671,7 @@
     const toOrder = order.reduce((s, e) => s + Math.ceil(e.litres - 1e-9), 0);
     lastResult = { t, q, z, order, spec: specLines(q, z) };
     $("#spec").textContent = lastResult.spec.join("\n");
-    $("#kpis").replaceChildren(
+    fill($("#kpis"),
       h("div", { class: "kpi main" }, h("div", { class: "l" }, "Total surface area"), h("div", { class: "v" }, `${nf(t.totalArea)} m²`), h("div", { class: "s" }, t.allowanceArea ? `includes ${nf(+state.allow, 0)}% allowance` : "no allowance added")),
       h("div", { class: "kpi" }, h("div", { class: "l" }, "Pipe"), h("div", { class: "v" }, `${nf(t.pipeArea)} m²`), h("div", { class: "s" }, `${nf(t.pipeLength, 1)} m of pipe`)),
       h("div", { class: "kpi" }, h("div", { class: "l" }, "Structural steel"), h("div", { class: "v" }, `${nf(t.steelArea)} m²`), h("div", { class: "s" }, `${nf(t.steelLength, 1)} m of members`)),
