@@ -278,8 +278,9 @@ test("Annex B minimums: spot values from ISO 12944-5:2018", () => {
 });
 
 test("every Jotun system reaches exactly the durability Jotun ticks (ISO tables and brochure agree)", () => {
-  assert.ok(DB.systems.length >= 80);
-  for (const sys of DB.systems) {
+  const jotun = DB.systems.filter((s) => s.supplier === "jotun");
+  assert.equal(jotun.length, 84);
+  for (const sys of jotun) {
     const layers = C.systemLayers(sys, "jotun");
     for (const l of layers) {
       const p = C.getProduct("jotun", l.productId);
@@ -290,6 +291,38 @@ test("every Jotun system reaches exactly the durability Jotun ticks (ISO tables 
     const a = C.assess(layers, sys.substrate, sys.env);
     assert.equal(a.achieved, sys.dur, `${sys.id} (${sys.substrate} ${sys.env}): ISO allows ${a.achieved}, Jotun ticks up to ${sys.dur}`);
     assert.deepEqual(C.productWarnings(layers, "jotun"), [], sys.id);
+  }
+});
+
+test("every supplier's systems: products, film thickness and the basis of each rating", () => {
+  const ids = new Set();
+  const durI = (d) => ["L", "M", "H", "VH"].indexOf(d);
+  for (const sys of DB.systems) {
+    const key = `${sys.id}|${sys.substrate}|${sys.env}`;          // the app looks systems up by all three
+    assert.ok(!ids.has(key), `duplicate system ${key}`);
+    ids.add(key);
+    assert.ok(C.getSupplier(sys.supplier), `${sys.id}: supplier ${sys.supplier}`);
+    assert.ok(["carbon", "hdg", "tsm"].includes(sys.substrate), sys.id);
+    assert.ok(C.getEnv(sys.env) && sys.env !== "C1", `${sys.id}: env ${sys.env}`);
+    assert.ok(durI(sys.dur) >= 0, `${sys.id}: dur`);
+    assert.ok(sys.table && sys.layers.length, sys.id);
+    const layers = C.systemLayers(sys, sys.supplier);
+    for (const l of layers) {
+      const p = C.getProduct(sys.supplier, l.productId);
+      assert.ok(p, `${sys.id}: product ${l.productId} missing`);
+      assert.ok(p.vs > 0 && p.vs <= 100, `${sys.id}: ${p.name} solids`);
+      assert.equal(p.type, l.type, `${sys.id}: ${p.name} type`);
+    }
+    if (sys.supplier === "jotun") continue;          // checked exactly above
+    const a = C.assess(layers, sys.substrate, sys.env);
+    if (sys.basis === "tested") {
+      // a tested rating is only recorded where Annex B gives less (or nothing): otherwise it would be "annexB"
+      assert.ok(!a.applicable || a.achieved === null || durI(a.achieved) < durI(sys.dur) || C.getEnv(sys.env).kind === "part9",
+        `${sys.id}: marked tested but Annex B allows ${a.achieved}`);
+    } else {
+      assert.equal(sys.basis, "annexB", `${sys.id}: basis`);
+      assert.ok(a.applicable && durI(a.achieved) >= durI(sys.dur), `${sys.id} (${sys.substrate} ${sys.env}): ${sys.supplier} rates ${sys.dur}, Annex B allows ${a.achieved}`);
+    }
   }
 });
 
