@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Section-database inputs: keep them byte for byte (CRLF line endings), so the generators reproduce data/ exactly
+sources/*.xml -text
+sources/*.stp -text

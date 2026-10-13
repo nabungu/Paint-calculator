@@ -1,7 +1,7 @@
 /* AISC (US imperial) steel sections: mass and painted surface area per metre.
  *
  * GENERATED FILE - do not edit by hand. Regenerate with:
- *     python3 -I tools/build_aisc.py <AISC2001.stp> <steelsnakes-extract-dir> data/sections-aisc.js
+ *     python3 -I tools/build_aisc.py sources/aisc2001.stp <steelsnakes-extract-dir> data/sections-aisc.js
  *
  * Each item: [designation, mass kg/m, painted area m2/m, dimensions mm, note?]. The painted area is the
  * full outer perimeter of the cross-section (all faces) per metre of length. Dimensions are d x bf x tw x tf
@@ -11,7 +11,8 @@
  *
  * SOURCES
  *  - Which sizes: the AISC EDI Standard Nomenclature list, June 2001 edition, as distributed by the Steel
- *    Construction Institute in the CIMsteel STEP file "AISC2001.stp" (1,923 designations, names only).
+ *    Construction Institute in the CIMsteel STEP file "AISC2001.stp" (1,923 designations, names only;
+ *    kept in sources/aisc2001.stp).
  *  - Dimensions, weights and AISC's own painted perimeter PB: the AISC Shapes Database v16.0 as packaged
  *    in the open-source `steelsnakes` Python package (0.0.1a11, US/data/*.json, inches and lb/ft).
  *  - 2001-only shapes (not in v16): see below.

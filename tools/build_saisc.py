@@ -1,10 +1,10 @@
 """Generate data/sections-saisc.js (the SAISC catalogue) from a SAISC section database for Robot.
 
 Run with:  python3 -I tools/build_saisc.py <Saiscpro.xml> <out.js>
-e.g.       python3 -I tools/build_saisc.py ~/steeldb/Saiscpro.xml data/sections-saisc.js
+e.g.       python3 -I tools/build_saisc.py sources/Saiscpro.xml data/sections-saisc.js
 
 Input: "Saiscpro.xml", an Autodesk Robot section database of SAISC (Southern African) sections, supplied by the
-project owner. It is NOT committed to this repository. Lengths in it are metres, MASS is kg/m and SURF
+project owner and kept in sources/Saiscpro.xml. Lengths in it are metres, MASS is kg/m and SURF
 is Robot's "painting surface" in m2/m.
 
 Every Robot family was checked row by row (perimeters recomputed from the Robot PDL outline scripts, closed-form
@@ -577,10 +577,10 @@ def build_cold_formed(F):
 HEADER = """/* SAISC structural steel sections (Southern Africa): mass and painted surface area per metre.
  *
  * GENERATED FILE, do not edit by hand. Regenerate with:
- *   python3 -I tools/build_saisc.py <path/to/Saiscpro.xml> data/sections-saisc.js
+ *   python3 -I tools/build_saisc.py sources/Saiscpro.xml data/sections-saisc.js
  *
- * Source: a SAISC section database for Autodesk Robot ("Saiscpro.xml") supplied by the project owner; NOT committed
- * to this repository. The SAISC Red Book (Southern African Steel Construction Handbook) was NOT used: nothing
+ * Source: a SAISC section database for Autodesk Robot ("Saiscpro.xml") supplied by the project owner, kept in
+ * sources/Saiscpro.xml. The SAISC Red Book (Southern African Steel Construction Handbook) was NOT used: nothing
  * here was copied from it.
  *
  * Item: [designation, mass kg/m, painted area m2/m, main dimensions mm (, note)].

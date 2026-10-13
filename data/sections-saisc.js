@@ -1,10 +1,10 @@
 /* SAISC structural steel sections (Southern Africa): mass and painted surface area per metre.
  *
  * GENERATED FILE, do not edit by hand. Regenerate with:
- *   python3 -I tools/build_saisc.py <path/to/Saiscpro.xml> data/sections-saisc.js
+ *   python3 -I tools/build_saisc.py sources/Saiscpro.xml data/sections-saisc.js
  *
- * Source: a SAISC section database for Autodesk Robot ("Saiscpro.xml") supplied by the project owner; NOT committed
- * to this repository. The SAISC Red Book (Southern African Steel Construction Handbook) was NOT used: nothing
+ * Source: a SAISC section database for Autodesk Robot ("Saiscpro.xml") supplied by the project owner, kept in
+ * sources/Saiscpro.xml. The SAISC Red Book (Southern African Steel Construction Handbook) was NOT used: nothing
  * here was copied from it.
  *
  * Item: [designation, mass kg/m, painted area m2/m, main dimensions mm (, note)].
