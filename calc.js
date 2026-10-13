@@ -24,7 +24,35 @@
     const f = findFamily(familyId);
     return f ? f.items.find((i) => i[0] === designation) || null : null;
   }
-  const SECTION = { name: 0, mass: 1, area: 2, dims: 3 };
+  // item = [designation, kg/m, m2/m, dimensions (mm), note (optional)]
+  const SECTION = { name: 0, mass: 1, area: 2, dims: 3, note: 4 };
+
+  /** Section catalogues (SAISC, EN, AISC ...), most preferred first. Each data/sections-*.js file adds one. */
+  function catalogues() {
+    return (db().sections.catalogues || []).slice().sort((a, b) => a.rank - b.rank);
+  }
+  function findCatalogue(id) {
+    return catalogues().find((c) => c.id === id) || null;
+  }
+  const catRank = (fam) => { const c = findCatalogue(fam.catalogue); return c ? c.rank : Infinity; };
+  /** Designation as people write it: "UB 254x146x31", "IPE 200", "W8x31", "L 100x100x10". */
+  function sectionName(fam, item) {
+    const p = fam.prefix === undefined ? fam.id : fam.prefix;
+    const d = item[SECTION.name];
+    return !p || d.startsWith(p + " ") || (d.startsWith(p) && /\d/.test(d.charAt(p.length))) ? d : `${p} ${d}`;
+  }
+  const GROUP_ORDER = ["I-sections", "Channels", "Angles", "Tees", "Hollow sections", "Cold-formed"];
+  /** Families for a picker: [{ catalogue, group, families }] by catalogue rank, then group, then file order. */
+  function sectionGroups() {
+    const out = [];
+    for (const cat of catalogues()) {
+      const fams = db().sections.families.filter((f) => f.catalogue === cat.id);
+      const groups = [...new Set(fams.map((f) => f.group))]
+        .sort((a, b) => (GROUP_ORDER.indexOf(a) + 1 || 99) - (GROUP_ORDER.indexOf(b) + 1 || 99));
+      for (const g of groups) out.push({ catalogue: cat, group: g, families: fams.filter((f) => f.group === g) });
+    }
+    return out;
+  }
 
   // ------------------------------------------------------------------ geometry
   /** External painted area of a pipe per metre (m2/m) = pi x OD. */
@@ -47,9 +75,10 @@
   /**
    * Work out one list line.
    * line = { kind: 'pipe', size: '6', schedule: 'STD', surfaces: 'ext'|'both', length, qty }
-   *      | { kind: 'section', family: 'UB', size: '254x146x31', paintPct: 100, length, qty }
+   *      | { kind: 'section', family: 'SA-UB', size: '254x146x31', paintPct: 100, length, qty }
    *      | { kind: 'custom', label, perimeter (mm, all painted faces), massPerM (kg/m, optional), length, qty }
-   * Returns { ok, error?, label, areaPerM, massPerM, totalLength, area, mass, warnings }.
+   * Returns { ok, error?, label, areaPerM, massPerM, totalLength, area, mass, warnings }; section lines also give
+   * catalogue and note (the table's flag for a legacy, superseded or discontinued size, or null).
    */
   function lineMetrics(line) {
     const out = { ok: false, label: "", areaPerM: 0, massPerM: null, totalLength: 0, area: 0, mass: null, warnings: [] };
@@ -69,7 +98,7 @@
       out.massPerM = line.schedule ? pipeMassPerM(pipe, line.schedule) : null;
       if (line.schedule && out.massPerM === null) out.warnings.push(`NPS ${pipe.nps} has no Sch ${line.schedule} in B36.10M`);
     } else if (line.kind === "custom") {
-      // anything not in the database (flat bar, plate, tee, small tube ...): the user supplies the perimeter in mm
+      // anything not in the database (flat bar, plate, welded section ...): the user supplies the perimeter in mm
       const perimeter = num(line.perimeter);
       if (!(perimeter > 0)) { out.error = "Enter the perimeter (mm) of the custom member"; return out; }
       out.label = line.label ? String(line.label) : "Custom member";
@@ -79,7 +108,10 @@
       const fam = findFamily(line.family);
       const sec = fam && findSection(line.family, line.size);
       if (!sec) { out.error = `Unknown section "${line.family} ${line.size}"`; return out; }
-      out.label = `${fam.id} ${sec[SECTION.name]}`;
+      const cat = findCatalogue(fam.catalogue);
+      out.label = sectionName(fam, sec) + (cat ? ` (${cat.short}${fam.variant ? ", " + fam.variant : ""})` : "");
+      out.catalogue = fam.catalogue || null;
+      out.note = sec[SECTION.note] || null;
       const pct = line.paintPct === undefined || line.paintPct === "" ? 100 : num(line.paintPct, 100);
       out.areaPerM = (sec[SECTION.area] * pct) / 100;
       out.massPerM = sec[SECTION.mass];
@@ -360,18 +392,77 @@
   }
 
   // ------------------------------------------------------------------ bulk import
+  // Family words a list may use -> candidate families. The size decides between candidates; when it exists in more
+  // than one catalogue the most preferred catalogue wins (SAISC, then EN, then AISC: see catalogues()).
   const FAMILY_ALIASES = {
     PIPE: "PIPE", PIPES: "PIPE", NPS: "PIPE", P: "PIPE",
-    SHS: ["SHS-CF", "SHS-HF"], RHS: ["RHS-CF", "RHS-HF"], CHS: ["CHS-CF", "CHS-HF"],
-    L: ["EA", "UA"], ANGLE: ["EA", "UA"], IPEA: "IPEA", IPEO: "IPEO"
+    UB: ["SA-UB", "UB"], UC: ["SA-UC", "UC"], HP: ["SA-HP", "US-HP"], UBP: ["SA-HP"],
+    IPE: ["SA-IPE", "IPE"], IPEA: ["IPEA"], IPEAA: ["SA-IPEAA"], IPEO: ["IPEO"],
+    ITF: ["SA-ITF"], RSJ: ["SA-ITF"],
+    PFC: ["SA-PFC", "PFC"], UPN: ["SA-UPN", "UPN"], TFC: ["SA-CBS"], CBS: ["SA-CBS"],
+    L: ["SA-EA", "SA-UA", "EA", "UA", "US-L"], ANGLE: ["SA-EA", "SA-UA", "EA", "UA", "US-L"],
+    EA: ["SA-EA", "EA"], UA: ["SA-UA", "UA"],
+    T: ["SA-STI", "SA-STH"], TEE: ["SA-STI", "SA-STH"], STI: ["SA-STI"], STH: ["SA-STH"],
+    TEECUTFROMUB: ["SA-STI"], TEECUTFROMUC: ["SA-STH"],
+    SHS: ["SA-SHS", "SHS-CF", "SHS-HF"], RHS: ["SA-RHS", "RHS-CF", "RHS-HF"], CHS: ["SA-CHS", "CHS-CF", "CHS-HF"],
+    CC: ["SA-CC"], LIPPEDCHANNEL: ["SA-CC"], CZ: ["SA-CZ"], LIPPEDZ: ["SA-CZ"], CL: ["SA-CL"], LIPPEDANGLE: ["SA-CL"],
+    W: ["US-W"], M: ["US-M"], S: ["US-S"], C: ["US-C"], MC: ["US-MC"],
+    WT: ["US-WT"], MT: ["US-MT"], ST: ["US-ST"], HSS: ["US-HSSR", "US-HSSC"]
   };
-  // A family prefix before the first digit ("IPE 200", "HEB300", "L50x50x5", "UB 254x146x31") is dropped from both
-  // the database designation and the user's token so they compare on the numbers alone.
-  const prefixRe = /^(ipe[ao]?|he[abm]|upn|ub|uc|pfc|shs|rhs|chs|l)(?=\d)/;
-  const normSize = (s) => {
-    const t = String(s).toLowerCase().replace(/\s*[×*]\s*/g, "x").replace(/\s+/g, "").replace(prefixRe, "");
-    return t.split("x").map((p) => (/^\d+(\.\d+)?$/.test(p) ? String(parseFloat(p)) : p)).join("x");
+  const squash = (s) => String(s).trim().toUpperCase().replace(/[\s_-]+/g, "");
+  /**
+   * Candidate families for a family word ("UB", "IPE AA", "HSS", "Tee cut from UB") or a family id ("SA-UB", "SHS HF").
+   * A catalogue name in front of a word ("EN UB", "AISC L") keeps that catalogue's families only.
+   */
+  function familyCandidates(token) {
+    const key = squash(token);
+    const a = FAMILY_ALIASES[key];
+    if (a) return a;
+    const byId = db().sections.families.find((f) => squash(f.id) === key);
+    if (byId) return [byId.id];
+    for (const c of catalogues()) {
+      const cs = squash(c.short || c.id);
+      if (key.length <= cs.length || !key.startsWith(cs)) continue;
+      const rest = familyCandidates(key.slice(cs.length));
+      const own = Array.isArray(rest) ? rest.filter((fid) => (findFamily(fid) || {}).catalogue === c.id) : [];
+      if (own.length) return own;
+    }
+    return [String(token).trim().toUpperCase()];
+  }
+  /**
+   * Split a size into its letter prefix and its numbers: "UB 254 x 146 x 31" -> ub [254, 146, 31];
+   * "HSS6X6X.3125" -> hss [6, 6, 0.3125]; "L3-1/2x3x1/4" -> l [3.5, 3, 0.25]; "100x100x6,3" -> "" [100, 100, 6.3];
+   * "Lipped channel 75x50x20x2" -> lippedchannel [75, 50, 20, 2].
+   */
+  function sizeKey(s) {
+    const t = String(s).toLowerCase().replace(/\s*[×*]\s*/g, "x").replace(/(\d),(\d)/g, "$1.$2").replace(/\s+/g, "")
+      .replace(/([a-z])-(?=[a-z])/g, "$1");
+    const prefix = (t.match(/^[a-z]+(?=[\d.])/) || [""])[0];
+    const parts = t.slice(prefix.length).split("x").map((p) => {
+      let m;
+      if (/^\d*\.?\d+$/.test(p)) return parseFloat(p);
+      if ((m = p.match(/^(\d+)-(\d+)\/(\d+)$/))) return +m[1] + m[2] / m[3];
+      if ((m = p.match(/^(\d+)\/(\d+)$/))) return m[1] / m[2];
+      return p;
+    });
+    return { prefix, parts };
+  }
+  // numbers equal within 0.0021 so that AISC decimal walls match their fractions (.312 = 5/16, .188 = 3/16)
+  const sameParts = (a, b) => a.length === b.length &&
+    a.every((x, i) => (typeof x === "number" && typeof b[i] === "number" ? Math.abs(x - b[i]) <= 0.0021 : x === b[i]));
+  const keyCache = new Map();
+  const familyKeys = (f) => {
+    if (!keyCache.has(f)) keyCache.set(f, f.items.map((it) => ({ it, ...sizeKey(it[SECTION.name]) })));
+    return keyCache.get(f);
   };
+  /** True when a prefix written in the size ("ipe", "wt", "sti") names this family, or there is none. */
+  function prefixFits(prefix, fam, itemPrefix) {
+    if (!prefix || prefix === itemPrefix || prefix === squash(fam.prefix || "").toLowerCase()) return true;
+    const c = familyCandidates(prefix);
+    return Array.isArray(c) && c.includes(fam.id);
+  }
+  /** Size as compared by the import: "UB 254 x 146 x 31" -> "254x146x31", "HSS6X6X.3125" -> "6x6x0.3125". */
+  const normSize = (s) => sizeKey(s).parts.join("x");
   const npsValue = (label) =>
     label.split(" ").reduce((a, tok) => a + (tok.includes("/") ? +tok.split("/")[0] / +tok.split("/")[1] : +tok), 0);
   /** Resolve a pipe size token ("6", "NPS 6", "DN150", "1-1/2", "1.5", "6\"") to a database NPS label. */
@@ -387,35 +478,46 @@
     if (!p && /^\d*\.\d+$|^\d+$/.test(t)) p = db().pipes.pipes.find((x) => Math.abs(npsValue(x.nps) - parseFloat(t)) < 1e-9);
     return p ? p.nps : null;
   }
+  /**
+   * Find a section from a family word and a size. Returns { family, size, note? } or null.
+   * The best hit is the one in the most preferred catalogue; within that catalogue, when the size is in two families
+   * (hot-finished and cold-formed tube), the larger area, so paint is never under-estimated. A prefix written in the
+   * size must name the family ("W, WT6x25" finds nothing rather than W6x25). The note says what was chosen when
+   * another family has the size with a different area: any difference within the catalogue, over 1 % across
+   * catalogues.
+   */
   function resolveSection(familyToken, sizeToken) {
-    const key = String(familyToken).trim().toUpperCase();
-    let cand = FAMILY_ALIASES[key] || key;
+    const cand = familyCandidates(familyToken);
     if (cand === "PIPE") return null;
-    cand = Array.isArray(cand) ? cand : [cand];
-    const want = normSize(sizeToken);
+    const want = sizeKey(sizeToken);
     const hits = [];
-    for (const fid of cand) {
+    cand.forEach((fid, order) => {
       const f = findFamily(fid);
-      if (!f) continue;
-      const it = f.items.find((i) => normSize(i[0]) === want);
-      if (it) hits.push({ family: fid, size: it[0] });
-    }
-    if (hits.length === 1) return hits[0];
-    if (hits.length > 1) {
-      // the size exists in more than one family (e.g. hot-finished and cold-formed tube): use the larger area
-      // so paint is never under-estimated, and tell the caller
-      const withArea = hits.map((h) => ({ ...h, area: findSection(h.family, h.size)[SECTION.area] }));
-      withArea.sort((a, b) => b.area - a.area);
-      const [best, other] = withArea;
-      return { ...best, note: `exists in ${withArea.map((h) => h.family).join(" and ")}; used ${best.family} (larger area, ${(((best.area - other.area) / other.area) * 100).toFixed(1)}% more)` };
-    }
-    return null;
+      if (!f) return;
+      const k = familyKeys(f).find((x) => sameParts(x.parts, want.parts) && prefixFits(want.prefix, f, x.prefix));
+      if (k) hits.push({ fam: f, item: k.it, rank: catRank(f), order, area: k.it[SECTION.area] });
+    });
+    if (!hits.length) return null;
+    hits.sort((a, b) => a.rank - b.rank || b.area - a.area || a.order - b.order);
+    const best = hits[0];
+    const out = { family: best.fam.id, size: best.item[SECTION.name] };
+    const where = (h) => `${h.fam.catalogue || ""} ${h.fam.name}`.trim();
+    const pct = (a, base) => `${((Math.abs(a - base) / base) * 100).toFixed(1)}%`;
+    // same catalogue (hot-finished and cold-formed tube): only when the areas really differ
+    const same = hits.filter((h) => h !== best && h.rank === best.rank && (best.area - h.area) / h.area > 0.0005);
+    const other = hits.filter((h) => h.rank !== best.rank && Math.abs(h.area - best.area) / best.area > 0.01);
+    const notes = [];
+    if (same.length) notes.push(`exists in ${[best, ...same].map(where).join(" and ")}; used ${where(best)} (larger area, ${pct(best.area, same[0].area)} more)`);
+    if (other.length) notes.push(`${other.map((h) => `the ${where(h)} table gives ${pct(h.area, best.area)} ${h.area > best.area ? "more" : "less"} area`).join("; ")}; used ${best.fam.catalogue}`);
+    if (notes.length) out.note = notes.join("; ");
+    return out;
   }
 
   /**
    * Parse a pasted list. One member per line: family, size, length (m), qty [, schedule (pipes) | paint % (steel)].
    * Delimiter: tab, semicolon or comma (a decimal comma is accepted when tabs/semicolons are used).
-   * family is PIPE or a section family id (UB, UC, IPE, HEA, PFC, EA, SHS-CF ...) or SHS/RHS/CHS/L; if a size exists in several families the larger area is used and a warning returned.
+   * family is PIPE, a family id (SA-UB, UB, SHS-CF, US-W ...) or a family word (UB, UC, IPE, PFC, L, SHS, W, HSS ...);
+   * the size picks the family (SAISC first, then EN, then AISC) and a warning says when another family has it too.
    * Returns { lines, errors, warnings } where errors/warnings are [{ row, text, message }]; a line with an error is skipped.
    */
   function parseList(text) {
@@ -434,7 +536,7 @@
       const [fam, size, lenC, qtyC, extra] = cells;
       const length = dec(lenC), qty = dec(qtyC);
       if (!(length > 0) || !(qty > 0)) { errors.push({ row, text: t, message: "Length and quantity must be positive numbers" }); return; }
-      if ((FAMILY_ALIASES[fam.toUpperCase()] || "") === "PIPE") {
+      if (familyCandidates(fam) === "PIPE") {
         const nps = resolvePipe(size);
         if (!nps) { errors.push({ row, text: t, message: `Unknown pipe size "${size}"` }); return; }
         const pipe = findPipe(nps);
@@ -448,6 +550,8 @@
         const r = resolveSection(fam, size);
         if (!r) { errors.push({ row, text: t, message: `No section "${fam} ${size}" in the database` }); return; }
         if (r.note) warnings.push({ row, text: t, message: `"${fam} ${size}" ${r.note}` });
+        const flag = findSection(r.family, r.size)[SECTION.note];
+        if (flag) warnings.push({ row, text: t, message: `"${fam} ${size}": * ${flag}` });
         const paintPct = extra ? dec(extra) : 100;
         lines.push({ kind: "section", family: r.family, size: r.size, paintPct: paintPct > 0 && paintPct <= 100 ? paintPct : 100, length, qty });
       }
@@ -456,12 +560,12 @@
   }
 
   return {
-    findPipe, findFamily, findSection, SECTION,
+    findPipe, findFamily, findSection, SECTION, catalogues, findCatalogue, sectionName, sectionGroups,
     pipeExternalPerM, pipeInternalPerM, pipeMassPerM,
     lineMetrics, totals,
     getSupplier, getProduct, pickProduct, paintQuantities,
     getEnv, systemsFor, getLibrarySystem, systemLayers, requirementsFor, assess, durabilitiesFor,
     productWarnings, checkLayers, recommend, categoryFromLoss,
-    resolvePipe, resolveSection, parseList
+    resolvePipe, resolveSection, normSize, parseList
   };
 });

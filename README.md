@@ -10,9 +10,20 @@ it keeps your list in the browser's `localStorage`.
 
 ## What it does
 
-1. **Members.** Add pipe by NPS/schedule (ASME B36.10M), steel sections (UB, UC, IPE, HEA/HEB/HEM, PFC, UPN,
-   equal and unequal angles, SHS/RHS/CHS), or a custom member (flat bar, plate, small tube: type the perimeter).
-   You can also paste a list from a spreadsheet (`family, size, length, qty`) or load the example.
+1. **Members.** Add pipe by NPS/schedule (ASME B36.10M), a steel section, or a custom member (flat bar, plate,
+   welded section: type the perimeter). Sections come from three catalogues, listed in this order:
+   * **SAISC**: UB, UC, H-bearing piles, IPE, IPE AA, ITF joists, PFC, UPN and BS taper channels, equal and unequal
+     angles, tees cut from UB and UC, SHS, RHS, CHS, and cold-formed lipped channels, Z and angles;
+   * **EN / BS**: UB, UC, IPE, IPE A/O, HEA/HEB/HEM, PFC, UPN, angles, hot-finished and cold-formed hollow sections;
+   * **AISC** (US imperial): W, M, S, HP, C, MC, L, WT, MT, ST and HSS.
+
+   You can also paste a list from a spreadsheet (`family, size, length, qty`) or load the example. A family word
+   such as `UB`, `L`, `SHS` or `W` finds the size in the SAISC table first, then EN, then AISC, and the import says
+   when another table has the same size with an area more than 1 % different. Put the catalogue in front of the word
+   (`EN UB`, `AISC L`) or give a table's own id (`SA-UB`, `SHS-HF`, `HEB`, `US-W`) to use one table. A prefix written in
+   the size must match the family: `W, WT6x25` is rejected rather than read as W6x25. AISC 2001 spellings such as
+   `HSS6X6X.3125` and decimal commas (`100x100x6,3`) are understood. Sizes marked * (legacy, superseded, etc.) are
+   listed in the import messages.
 2. **Environment and system.**
    * Pick the substrate (blast-cleaned carbon steel, hot-dip galvanized, thermal-sprayed metal), the environment
      (C1–C5 and CX in air; Im1–Im3 in water or soil; Im4) and the durability you need. *Not sure?* works the category
@@ -46,14 +57,28 @@ it keeps your list in the browser's `localStorage`.
 
 Check: 100 m² at 100 µm and 80 % solids is 12.5 L theoretical (8 m²/L, Jotamastic 90's published rate).
 
-Section perimeters (mm, then ÷ 1000 for m²/m), from the nominal dimensions h, b, tw, tf and root radius r:
+Section areas per metre are the full outline of the cross-section (every face that takes paint, including angle toe
+ends, tee stems and lip edges), in mm ÷ 1000, from the nominal dimensions h, b, tw, tf, root radius r1 and toe
+radius r2:
 
-* I and H sections: `2h + 4b − 2tw + (2π − 8) r`
-* Parallel flange channels: `2h + 4b − 2tw − (4 − π) r`
-* Taper flange channels (UPN, 8 % flange slope): the channel formula with the flange taper correction, toe radii ignored
-* Angles: `2 (L1 + L2) − (2 − π/2)(r1 + 4 r2)`
-* Hollow sections: `2 (h + b) − (8 − 2π) ro`, outer corner radius `ro = 1.5 t` (hot-finished) or `2t / 2.5t / 3t` for
-  `t ≤ 6 / ≤ 10 / > 10 mm` (cold-formed); circular `π × d`
+* I and H sections: `2h + 4b − 2tw + (2π − 8) r1`
+* Parallel flange channels: `2h + 4b − 2tw − (4 − π) r1`
+* Taper flange channels (UPN 8 % up to UPN 300 and 5 % above; BS taper channels 5°, the SA 178x54 at its fitted
+  3.4 %):
+  `2h + 2b + 2(b − tw) k − 2(r1 + r2)(2k − θ)` with `k = (1 − sin α) / cos α`, `θ = π/2 − α`, `tan α` = the slope
+* Taper flange I-beams (ITF): `2h + 2b + 4L (1 − sin α) / cos α + 4(r1 + r2)(π/2 − α − cos α)`,
+  `L = (b − tw)/2 − (r1 + r2)(1 − sin α)`
+* Angles: `2 (L1 + L2) − (2 − π/2)(r1 + 2 r2)`: a root radius and one radius on each inner toe corner; the heel and
+  outer toe corners are sharp. (Earlier versions counted four toe radii and were 1–2 % low.)
+* Tees cut from I-sections: half the parent's outline plus the web thickness (the cut face)
+* Hollow sections: `2 (h + b) − (8 − 2π) ro`, circular `π × d`. Outer corner radius `ro`:
+  * EN 10210 hot-finished: `1.5t` at every wall;
+  * EN 10219 cold-formed: `2t / 2.5t / 3t` for `t ≤ 6 / ≤ 10 / > 10 mm`;
+  * SAISC tubes: `2t / 2.5t` up to 10 mm, and `1.5t` for the 12.5 and 16 mm walls, which are hot-finished.
+* Cold-formed lipped sections: twice the centre-line length plus the two lip edges, inner bend radius `t`
+* AISC: W, M, S and HP use AISC's published perimeter; WT, MT and ST half the parent's plus the web; C and MC the
+  sloped-flange outline; angles `2 (d + b) − (2 − π/2) r1`; rectangular HSS `ro = 2 × design wall`; round HSS
+  `π × OD`. Inches × 0.0254 = m, lb/ft × 1.488164 = kg/m.
 
 ## Where the data came from, and how far to trust it
 
@@ -63,24 +88,53 @@ The calculator is only as good as `data/`. Read this before relying on it for an
 open-source [`fluids`](https://pypi.org/project/fluids/) package (MIT) and spot-checked (NPS 6: 168.3 mm, 7.11 mm
 Sch 40, 21.95 mm XXS; mass 28.26 kg/m for 6" Sch 40). NPS 10 and 12 use the 2018 edition ODs (273.1 and 323.9 mm).
 
-**Structural steel (`data/sections.js`).** The SAISC *Southern African Steel Construction Handbook* ("Red Book") is a
-paid publication and was **not** used: nothing was copied from it. The database holds the standard rolled and
-hollow-section ranges that its tables are built on (ArcelorMittal South Africa's own datasheets say its I-sections
-follow BS 4 / DIN 1025 and its channels DIN 1026). Dimensions and mass come from the open-source
+**Structural steel, SAISC (`data/sections-saisc.js`, 793 sections, listed first).** Generated from a SAISC
+section database for Autodesk Robot (`Saiscpro.xml`, supplied by the project owner and not committed here) by
+`tools/build_saisc.py`. The SAISC *Red Book* itself was not used. Every row of the file (964) was checked by
+recomputing its outline from Robot's own drawing scripts, from closed-form formulas and from the file's section
+areas and masses, and each family was then reviewed by a second, adversarial check:
+
+* where the file's surface column is the true outline it is used as it stands: UB, UC, IPE, IPE AA, PFC, tees,
+  CHS, lipped channels and lipped angles, plus most H-piles;
+* where it is wrong, the outline above is used:
+  * angles: the file leaves out both toe end faces, so it was up to 6.6 % low;
+  * UPN and ITF: the file's column is shifted by one row, so UPN 100 showed 0.96 m²/m;
+  * BS taper channels: every row was wrong;
+  * SHS and RHS: the file uses sharp corners, and its masses mix three conventions, so mass is recomputed too;
+  * lipped Z: the file draws sharp inner bends;
+  * four heavy UBs whose surface figure has no fillet deduction (and a wrong root radius);
+  * two H-piles with a flange-width typo;
+* duplicate rows are dropped: IPF and HPF rows that repeat a UB or UC (the 13 sizes only they list are kept, as UB
+  and UC), the principal-axis copies of the angle tables, and 48 CHS rows with a rounded OD;
+* UPN masses are the DIN 1026 nominal values;
+* rows marked * carry a note: the legacy ITF joists, the obsolete BS 381x102 channel, two older PFCs, and the
+  hot-finished 12.5 and 16 mm hollow sections.
+
+Checks: UPN 100–300 match the published DIN 1026 areas within 0.07 %, and the angle outlines match published
+values (100×100×10 at 0.390 m²/m).
+
+**Structural steel, EN / BS (`data/sections.js`, 1,115 sections).** The standard rolled and hollow-section ranges
+(UB/UC to BS 4, IPE and HE to EN 10365, PFC, UPN to DIN 1026, EN 10056 angles, EN 10210 and EN 10219 hollow
+sections), generated by `tools/build_data.py`. Dimensions and mass come from the open-source
 [`steelsnakes`](https://github.com/waynemaranga/steelsnakes) dataset (GPL-2.0 package; the values are the
-standard-defined dimensions, which are facts, but note the licence if you redistribute). Areas were **computed** from
-the dimensions with the formulas above and compared with the published surface-area column:
+standard-defined dimensions, which are facts, but note the licence if you redistribute). Areas were **computed**
+from the dimensions with the formulas above and compared with the published surface-area column:
 
-* of the 1,016 sections that have a published value, 99 % agree with the computed area within 0.5 % and all but two
-  within 3 % (IPE 200: 0.768 m²/m and HEB 300: 1.73 m²/m match the published tables);
-* two heavy UBs (1016×305×584 and 914×305×576) have published values of 3.69 and 3.46 m²/m in the source
-  that disagree with their own dimensions (3.24 and 3.17 m²/m) and with the EU table's entry for the same
-  section; the computed values are used;
-* the source's UPN column is 10–15 % below the geometric perimeter and was not used.
+* every UC, IPE, HE, PFC and hollow section is within 0.5 % of the published value, and UB 104 of 107 within 1 %;
+* two heavy UBs (1016×305×584 and 914×305×576) have published values of 3.69 and 3.46 m²/m in the source that
+  disagree with their own dimensions (3.24 and 3.17 m²/m); the computed values are used;
+* the source's UPN column is 7.5–12.8 % below the outline and is not used. Some tables list UPN 120 as 0.434 and
+  UPN 180 as 0.611; 0.434 is the outline with the taper ignored, and 0.429 / 0.603 are kept.
 
-Not every section here is stocked in Southern Africa, and the Red Book may carry sizes or designations that differ
-slightly. Check any section that matters against the current Red Book or the mill catalogue. Missing sizes
-(small tube below the EN range, tees, flats, plate, welded sections) go in as *Custom member*.
+**Structural steel, AISC (`data/sections-aisc.js`, 1,289 sections).** The W, M, S, HP, C, MC, L, WT, MT, ST and HSS
+shapes of the AISC 2001 shape list (`aisc2001.stp`), with dimensions, weights and AISC's published perimeters from
+the AISC Shapes Database v16 (as packaged in `steelsnakes`), generated by `tools/build_aisc.py`. The list's double
+angles (enter a single angle with quantity 2) and pipes (already covered by B36.10M) are left out. Rows only in the
+2001 list are kept and marked *: 12 jumbo W36 sizes and their WT18 halves, which AISC has since replaced with sizes
+about 0.6 in deeper, and 40 HSS sizes no longer tabulated.
+
+Availability varies by mill and year. Check any section that matters against the mill's current tables. Members not
+listed (flats, plate, welded sections) go in as *Custom member*.
 
 **ISO 12944 (`data/iso12944.js`).** Taken from the standard itself (ISO 12944-2:2017, -3:2017, -4:2017 and
 -5:2018); only figures are used and none of its wording is reproduced.
@@ -119,7 +173,7 @@ stripe coats, pack sizes, prices.
 
 ## Editing the database
 
-Everything is data in `data/*.js`; the app and tests pick up changes automatically.
+Everything is data in `data/*.js`; the app and tests pick up edits to these files automatically (a new section file needs registering, see below).
 
 * **Add or correct a product:** add an object to the supplier in `data/paints.js` (`type` is `ZN`, `EP`, `PUR`, `AK`
   or `AY`; keep the `source` note honest). Order within a type is the order of preference when products are
@@ -129,8 +183,16 @@ Everything is data in `data/*.js`; the app and tests pick up changes automatical
 * **Add a system:** add an entry to `data/systems.js` with the durability its maker rates it for. `npm test` fails if
   ISO 12944-5 Annex B would allow a different durability, if a product is missing, or if a DFT is outside the
   product's range.
-* **Regenerate pipe and section tables:** `tools/build_data.py` (see its docstring; it needs the `fluids` and
-  `steelsnakes` wheels unpacked).
+* **Regenerate pipe and section tables:** `tools/build_data.py` (pipes and EN/BS sections; it needs the `fluids`
+  and `steelsnakes` wheels unpacked), `tools/build_saisc.py <Saiscpro.xml> data/sections-saisc.js` and
+  `tools/build_aisc.py <aisc2001.stp> <steelsnakes dir> data/sections-aisc.js`. Each docstring says what it reads
+  and why each family is computed the way it is.
+* **Add a section catalogue:** write a `data/sections-*.js` file that pushes a catalogue (`id`, `rank`, `name`,
+  `short`) and its families (`id`, `catalogue`, `prefix`, `name`, `group`, `std`, optional `variant`, `items`) onto
+  `PaintDB.sections`. Load it with a `<script>` tag in `index.html` before `calc.js`, add it to the `require` list at
+  the top of `test/calc.test.js`, and add its family ids to `FAMILY_ALIASES` in `calc.js` so family words such as
+  `UB` or `L` find them (an exact id works without that). The member picker groups by catalogue rank, and the
+  import picks the lowest rank that has the size.
 
 ## Tests
 
@@ -138,7 +200,8 @@ Everything is data in `data/*.js`; the app and tests pick up changes automatical
 npm test        # node:test, no dependencies
 ```
 
-They check the pipe tables against B36.10M values; section areas against published values and against the geometry;
+They check the pipe tables against B36.10M values; section areas against published values, the geometry and the values
+verified row by row for SAISC and AISC; the catalogue order, labels and the import's choice between catalogues;
 every product's spreading rate against its data sheet; the Annex B tables (spot values, and that minimums never fall as
 durability rises); every Jotun system against those tables; the compliance engine's columns, shortfalls and edge
 cases; the recommender; the category helper; the import parser; and an end-to-end job recomputed independently.

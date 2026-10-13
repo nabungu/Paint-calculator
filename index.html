@@ -81,6 +81,7 @@ tfoot td { font-weight: 700; border-bottom: 0; background: var(--panel-2); }
 tr.err td { background: var(--bad-bg); }
 .rowmsg { color: var(--bad); font-size: 12px; margin-top: 3px; }
 .rowwarn { color: var(--warn-ink); font-size: 12px; margin-top: 3px; }
+.rownote { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .empty { color: var(--muted); padding: 18px 6px; text-align: center; }
 
 .summary { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 12px; color: var(--muted); font-size: 14px; }
@@ -155,6 +156,8 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
   table.stack td.num, table.stack td.r { text-align: left; }
   table.stack td.act { display: grid; grid-template-columns: 1fr; justify-items: end; }
   table.stack td.act::before { display: none; }
+  table.stack td > .linemsgs { grid-column: 1 / -1; }
+  table.stack td > .linemsgs:empty { display: none; }
   .members .w-qty, .members .w-len, .members .w-pct, .layers .w-n, .layers .w-d { width: 100%; }
   .members td:nth-child(n) :is(select, input) { min-width: 0; }
   .layers td select { min-width: 0; }
@@ -184,7 +187,7 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
     <div class="toolbar">
       <button class="btn primary" id="add-pipe" type="button">+ Pipe</button>
       <button class="btn primary" id="add-section" type="button">+ Steel section</button>
-      <button class="btn" id="add-custom" type="button" title="Flat bar, plate, tee, small tube or anything not in the database">+ Custom member</button>
+      <button class="btn" id="add-custom" type="button" title="Flat bar, plate, welded section or anything not in the database">+ Custom member</button>
       <button class="btn" id="open-paste" type="button">Paste list…</button>
       <button class="btn ghost" id="load-example" type="button">Load example</button>
       <span class="spacer"></span>
@@ -290,7 +293,8 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
     <summary>Data sources, assumptions and limits (read before relying on the numbers)</summary>
     <ul>
       <li><b>Pipe, ASME B36.10M.</b> Outside diameters and wall thicknesses by schedule. Painted area is π × OD per metre of pipe; the optional internal surface and the steel mass use the wall thickness. Fittings, valves and flanges are not in the database: use the area allowance.</li>
-      <li><b>Structural steel.</b> The SAISC Red Book is a paid publication and nothing was copied from it. The section ranges are the standard UB/UC (BS 4), IPE/HE (DIN 1025), PFC, UPN (DIN 1026), angle (EN 10056) and hollow-section (EN 10210, EN 10219) series. Surface area per metre is computed from each section's dimensions and checked against published figures. Check a section against the current Red Book or your mill's catalogue if it matters; sections not listed (small tube, tees, flats, plate, welded sections) go in as <i>Custom member</i> with their perimeter.</li>
+      <li><b>Structural steel, SAISC (listed first).</b> From the SAISC section database for Robot Structural Analysis (<i>Saiscpro.xml</i>): UB, UC, H-bearing piles, IPE, IPE AA, ITF joists, PFC, UPN and BS taper channels, equal and unequal angles, tees cut from UB and UC, SHS, RHS, CHS and cold-formed lipped channels, Z and angles. Painted area per metre is the full outline of the section. Every row was recomputed from its dimensions; where the file's surface figure leaves faces out or disagrees with the geometry (angles, taper channels, ITF joists, most SHS and RHS, lipped Z sections, four heavy UBs and two H-piles) the geometric outline is used, and duplicate rows are dropped. The SAISC Red Book itself was not used.</li>
+      <li><b>Structural steel, EN / BS and AISC.</b> The European and British ranges (UB/UC to BS 4, IPE and HE to EN 10365, PFC, UPN to DIN 1026, EN 10056 angles, EN 10210 and EN 10219 hollow sections) and the AISC (US imperial) W, M, S, HP, C, MC, angle, tee and HSS shapes of the AISC 2001 shape list, with v16 dimensions; their areas are computed from the dimensions too, except that W, M, S and HP use AISC's published perimeter. When a pasted list names a size that is in more than one catalogue, the SAISC row is used and a note says if another table differs by more than 1 %. Sizes marked * carry a note (a legacy, superseded or discontinued size, hot-finished corner radii, or a mass caveat); check availability and anything that matters against the mill's current tables. Members not listed (flats, plate, welded sections) go in as <i>Custom member</i> with their perimeter.</li>
       <li><b>ISO 12944.</b> Category bands and examples follow ISO 12944-2 Table 1 and Table 2. Every paint system is checked against the minimum number of coats and minimum NDFT in ISO 12944-5 Annex B (Table B.2 carbon steel, B.3 galvanized, B.4 thermal-sprayed metal, B.5 immersion); the primer decides which column applies. Surface preparation follows Table B.1 and ISO 12944-4, design notes ISO 12944-3. Offshore CX and Im4 are qualified by testing to ISO 12944-9 (not available here), so only Jotun's tested systems are listed for them.</li>
       <li><b>Systems.</b> The library is Jotun's <i>ISO 12944 Coating Selector, rev. 2</i>: every carbon-steel, galvanized, metal-spray, immersion and offshore system it lists whose products' solids are known. For each one, the durability ISO 12944-5 allows matches the class Jotun ticks; the tests check this for all of them. Choosing Carboline or PPG keeps Jotun's builds but substitutes that supplier's product of the same type: those combinations are not certified by anyone.</li>
       <li><b>Paint products.</b> Volume solids and recommended film thickness come from supplier data-sheet extracts and distributor copies (the supplier websites could not be opened directly). Every product carries a note of what was seen (hover the product name); a few ranges are taken from how Jotun's selector uses the product, and Penguard Pro's solids are derived from its published spreading rates. Confirm each against the current data sheet.</li>
@@ -304,7 +308,7 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
   <h2 style="font-size:17px;margin-bottom:6px">Paste a list</h2>
   <p class="hint" style="margin:0 0 8px">One member per line, from a spreadsheet (tab-separated) or typed with commas or semicolons:<br>
     <code>family, size, length (m), quantity [, schedule for pipes | painted % for steel]</code><br>
-    Family: <code>PIPE</code>, <code>UB</code>, <code>UC</code>, <code>IPE</code>, <code>HEA</code>/<code>HEB</code>/<code>HEM</code>, <code>PFC</code>, <code>UPN</code>, <code>EA</code>, <code>UA</code>, <code>SHS</code>, <code>RHS</code>, <code>CHS</code> (or <code>SHS-HF</code>, <code>SHS-CF</code> …).
+    Family: <code>PIPE</code>, or a section word such as <code>UB</code>, <code>UC</code>, <code>IPE</code>, <code>IPE AA</code>, <code>HEA</code>/<code>HEB</code>/<code>HEM</code>, <code>PFC</code>, <code>UPN</code>, <code>L</code>, <code>T</code>, <code>SHS</code>, <code>RHS</code>, <code>CHS</code>, <code>W</code>, <code>C</code>, <code>WT</code>, <code>HSS</code> (searched in SAISC, then EN, then AISC). Put <code>EN</code> or <code>AISC</code> in front (<code>EN UB</code>) to use that table, or give a table's own id (<code>SA-UB</code>, <code>SHS-HF</code>, <code>US-W</code>).
     Pipe size: <code>6</code>, <code>NPS 6</code>, <code>DN150</code>, <code>1 1/2</code>. A decimal comma works when you use tabs or semicolons.</p>
   <textarea id="paste-text" spellcheck="false" placeholder="PIPE, 6, 12, 20, 40&#10;PIPE, DN80, 6, 30, 80&#10;UB, 305x165x40, 6.0, 8&#10;SHS, 100x100x5, 3.0, 12"></textarea>
   <div class="msgs" id="paste-msgs"></div>
@@ -332,7 +336,9 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
 </dialog>
 
 <script src="data/pipes.js"></script>
+<script src="data/sections-saisc.js"></script>
 <script src="data/sections.js"></script>
+<script src="data/sections-aisc.js"></script>
 <script src="data/paints.js"></script>
 <script src="data/iso12944.js"></script>
 <script src="data/systems.js"></script>

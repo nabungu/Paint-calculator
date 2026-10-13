@@ -91,22 +91,19 @@
 
   const sectionSizeSelect = (line) => {
     const fam = C.findFamily(line.family);
+    const S = C.SECTION;
     return h("select", { "aria-label": "Section size", onchange: (e) => { line.size = e.target.value; recalc(); }, value: line.size },
-      fam.items.map((it) => h("option", { value: it[0], title: `${it[3]} mm · ${nf(it[2], 3)} m²/m painted area` }, `${it[0]} · ${nf(it[1], 1)} kg/m`)));
+      fam.items.map((it) => h("option", { value: it[S.name], title: `${it[S.dims]} mm · ${nf(it[S.area], 4)} m²/m painted area${it[S.note] ? ` · ${it[S.note]}` : ""}` },
+        `${it[S.name]} · ${nf(it[S.mass], 1)} kg/m${it[S.note] ? " *" : ""}`)));
   };
 
   function typeSelect(line) {
-    const groups = [];
-    for (const f of DB.sections.families) {
-      let g = groups.find((x) => x.name === f.group);
-      if (!g) groups.push((g = { name: f.group, fams: [] }));
-      g.fams.push(f);
-    }
     const cur = line.kind === "section" ? line.family : line.kind;
     return h("select", { "aria-label": "Member type", onchange: (e) => changeType(line, e.target.value), value: cur },
       h("option", { value: "pipe" }, "Pipe (ASME B36.10M)"),
       h("option", { value: "custom" }, "Custom member"),
-      groups.map((g) => h("optgroup", { label: g.name }, g.fams.map((f) => h("option", { value: f.id }, f.name)))));
+      C.sectionGroups().map((g) => h("optgroup", { label: `${g.catalogue.name}: ${g.group}` },
+        g.families.map((f) => h("option", { value: f.id, title: f.std }, `${g.catalogue.short} · ${f.name}`)))));
   }
 
   function rowFor(line) {
@@ -136,7 +133,7 @@
         h("input", { type: "number", min: 0, step: 0.01, inputmode: "decimal", placeholder: "kg/m", "aria-label": "Mass in kg per metre (optional)", value: line.massPerM === undefined ? "" : line.massPerM,
           oninput: (e) => { line.massPerM = numVal(e.target); recalc(); } }));
     }
-    refs.msg = h("div");
+    refs.msg = h("div", { class: "linemsgs" });
     refs.area = h("td", { class: "num", dataset: { label: "Area (m²)" } });
     refs.mass = h("td", { class: "num", dataset: { label: "Mass (kg)" } });
     const tr = h("tr", { dataset: { id: line.id } },
@@ -185,7 +182,7 @@
   }
   function lastSectionFamily() {
     for (let i = state.lines.length - 1; i >= 0; i--) if (state.lines[i].kind === "section") return state.lines[i].family;
-    return "UB";
+    return C.findFamily("SA-UB") ? "SA-UB" : DB.sections.families[0].id;
   }
 
   // ------------------------------------------------------------------ environment, system choice and ISO 12944 check
@@ -450,7 +447,8 @@
       refs.tr.classList.toggle("err", !m.ok);
       refs.area.textContent = m.ok ? nf(m.area) : "–";
       refs.mass.textContent = m.ok && m.mass !== null ? nf(m.mass, 1) : "–";
-      refs.msg.replaceChildren(...(m.ok ? m.warnings.map((w) => h("div", { class: "rowwarn" }, w)) : [h("div", { class: "rowmsg" }, m.error)]));
+      fill(refs.msg, m.ok ? [m.note ? h("div", { class: "rownote" }, `* ${m.note}`) : null, m.warnings.map((w) => h("div", { class: "rowwarn" }, w))]
+        : h("div", { class: "rowmsg" }, m.error));
     });
     fill($("#members-summary"),
       summaryLine("Pipe:", `${nf(t.pipeLength, 1)} m · ${nf(t.pipeArea)} m²`),
@@ -548,8 +546,8 @@
     add("Environment", state.env, "Durability", state.dur, "Substrate", state.substrate, "Supplier", supplierName(state.supplier), "System", state.systemId ? sysName(state.systemId) + (isEdited() ? " (edited)" : "") : "own build");
     add("Application loss %", state.loss, "Area allowance %", state.allow);
     add();
-    add("Members"); add("Description", "Qty", "Length (m)", "Area per metre (m2/m)", "Area (m2)", "Mass (kg)");
-    state.lines.forEach((l, i) => { const m = t.lines[i]; add(m.ok ? m.label : m.error, l.qty, l.length, m.ok ? m.areaPerM.toFixed(4) : "", m.ok ? m.area.toFixed(3) : "", m.ok && m.mass !== null ? m.mass.toFixed(1) : ""); });
+    add("Members"); add("Description", "Qty", "Length (m)", "Area per metre (m2/m)", "Area (m2)", "Mass (kg)", "Note");
+    state.lines.forEach((l, i) => { const m = t.lines[i]; add(m.ok ? m.label : m.error, l.qty, l.length, m.ok ? m.areaPerM.toFixed(4) : "", m.ok ? m.area.toFixed(3) : "", m.ok && m.mass !== null ? m.mass.toFixed(1) : "", m.ok && m.note ? m.note : ""); });
     add("Total area (m2)", "", "", "", t.totalArea.toFixed(3));
     add();
     add("Paint system"); add("Layer", "Product", "Coats", "DFT per coat (um)", "Volume solids %", "Wet film per coat (um)", "Litres per coat (incl. loss)", "Litres theoretical", "Litres incl. loss");
@@ -584,7 +582,7 @@
   function loadExample() {
     const text = [
       "PIPE, 6, 12, 20, 40", "PIPE, 10, 6, 12, STD", "PIPE, 3, 6, 30, 80",
-      "UB, 305x165x40, 6.0, 8", "UC, 203x203x46, 4.5, 12", "PFC, 200x90x30, 6.0, 10", "EA, 75x75x8, 3.0, 24", "SHS, 100x100x5, 3.0, 12"
+      "UB, 305x165x40, 6.0, 8", "UC, 203x203x46, 4.5, 12", "PFC, 200x75, 6.0, 10", "L, 80x80x8, 3.0, 24", "SHS, 100x100x4, 3.0, 12"
     ].join("\n");
     const r = C.parseList(text);
     state.lines = r.lines.map((l) => ({ ...l, id: newId() }));

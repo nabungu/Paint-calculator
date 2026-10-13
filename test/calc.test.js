@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-for (const f of ["pipes", "sections", "paints", "iso12944", "systems"]) require(path.join("..", "data", f + ".js"));
+for (const f of ["pipes", "sections-saisc", "sections", "sections-aisc", "paints", "iso12944", "systems"]) require(path.join("..", "data", f + ".js"));
 const C = require("../calc.js");
 const DB = globalThis.PaintDB;
 
@@ -79,9 +79,94 @@ test("section data: published reference values", () => {
   // Blue Book style values for hollow sections and angles
   close(A("SHS-HF", "40x40x3.2"), 0.152, 0.001);
   close(A("CHS-HF", "42.4x3.2"), 0.133, 0.001);
-  close(A("EA", "200x200x24"), 0.777, 0.003);
-  close(A("EA", "50x50x5"), 0.191, 0.002);
+  // angles have two toe radii (inner toe corners only): 4L - (2 - pi/2)(r1 + 2 r2); 100x100x10 is listed as 0.390
+  close(A("EA", "100x100x10"), 0.3897, 0.00005);
+  close(A("EA", "200x200x24"), 0.7845, 0.00005);
+  close(A("EA", "50x50x5"), 0.1940, 0.00005);
+  // UPN with its 8 % flange taper and toe radii
+  close(A("UPN", "UPN 100"), 0.3720, 0.00005);
+  close(A("UPN", "UPN 320"), 0.9834, 0.00005);              // 5 % slope above UPN 300 (8 % would give 0.9800)
+  close(A("UPN", "UPN 400"), 1.1820, 0.00005);
   close(A("PFC", "430x100x64"), 1.225, 0.005);
+});
+
+test("section data: SAISC and AISC values verified row by row", () => {
+  const A = (f, d) => C.findSection(f, d)[C.SECTION.area];
+  const Mx = (f, d) => C.findSection(f, d)[C.SECTION.mass];
+  // SAISC (recomputed outlines where the source's surface figure left faces out)
+  close(A("SA-EA", "100x100x10"), 0.3897, 0.00005);
+  close(A("SA-EA", "50x50x5"), 0.1940, 0.00005);
+  close(A("SA-EA", "200x200x24"), 0.7845, 0.00005);
+  close(A("SA-EA", "50x50x3"), 0.1948, 0.00005);            // t < r2: the toe is one r2 arc (plain formula: 0.1940)
+  close(A("SA-UPN", "UPN 100"), 0.3720, 0.00005);
+  // 12.5 mm and thicker SAISC tube is hot-finished: ro = 1.5t (cold-formed 2.5t would give 0.5463, EN 10219 3t 0.5356)
+  assert.deepEqual(C.findSection("SA-SHS", "150x150x12.5").slice(1), [52.65, 0.5678, "150×150×12.5", "Hot-finished"]);
+  close(A("SA-ITF", "127x76x13"), 0.5234, 0.00005);
+  close(A("SA-SHS", "100x100x4"), 0.3863, 0.00005);
+  close(A("SA-PFC", "100x50"), 0.3828, 0.00005);
+  close(Mx("SA-PFC", "100x50"), 10.1, 0.005);
+  // AISC: W from the published paintable perimeter, WT = half the parent W + the web thickness
+  close(A("US-W", "W24x68"), 2.0726, 0.00005);
+  close(A("US-WT", "WT12x34"), 1.0469, 0.00005);
+  close(Mx("US-W", "W24x68"), 68 * 1.488164, 0.01);
+});
+
+test("section catalogues: SAISC first, then EN, then AISC; every family well formed", () => {
+  assert.deepEqual(C.catalogues().map((c) => c.id), ["SAISC", "EN", "AISC"]);
+  const ids = new Set();
+  const GROUPS = ["I-sections", "Channels", "Angles", "Tees", "Hollow sections", "Cold-formed"];
+  for (const f of DB.sections.families) {
+    assert.ok(!ids.has(f.id), `duplicate family id ${f.id}`);
+    ids.add(f.id);
+    assert.ok(C.findCatalogue(f.catalogue), `${f.id} catalogue`);
+    assert.equal(typeof f.prefix, "string", `${f.id} prefix`);
+    assert.ok(GROUPS.includes(f.group), `${f.id} group ${f.group}`);
+    assert.ok(f.name && f.std && f.items.length, f.id);
+    if (f.catalogue === "SAISC") assert.match(f.id, /^SA-/);
+    if (f.catalogue === "AISC") assert.match(f.id, /^US-/);
+  }
+  const groups = C.sectionGroups();
+  assert.equal(groups[0].catalogue.id, "SAISC");
+  assert.equal(groups[0].families[0].id, "SA-UB");
+  assert.deepEqual([...new Set(groups.map((g) => g.catalogue.id))], ["SAISC", "EN", "AISC"]);
+  assert.equal(groups.reduce((n, g) => n + g.families.length, 0), DB.sections.families.length);
+  // the families the verification kept
+  for (const id of ["SA-UB", "SA-UC", "SA-HP", "SA-IPE", "SA-IPEAA", "SA-ITF", "SA-PFC", "SA-UPN", "SA-CBS", "SA-EA", "SA-UA",
+    "SA-STI", "SA-STH", "SA-SHS", "SA-RHS", "SA-CHS", "SA-CC", "SA-CZ", "SA-CL",
+    "US-W", "US-M", "US-S", "US-HP", "US-C", "US-MC", "US-L", "US-WT", "US-MT", "US-ST", "US-HSSR", "US-HSSC"]) assert.ok(C.findFamily(id), id);
+  const count = (id) => C.findFamily(id).items.length;
+  assert.deepEqual(DB.sections.families.filter((f) => f.catalogue === "SAISC").map((f) => [f.id, f.items.length]), [
+    ["SA-UB", 41], ["SA-UC", 20], ["SA-HP", 13], ["SA-IPE", 6], ["SA-IPEAA", 6], ["SA-ITF", 7], ["SA-PFC", 11],
+    ["SA-UPN", 11], ["SA-CBS", 5], ["SA-EA", 51], ["SA-UA", 24], ["SA-STI", 35], ["SA-STH", 16], ["SA-SHS", 125],
+    ["SA-RHS", 120], ["SA-CHS", 157], ["SA-CC", 90], ["SA-CZ", 35], ["SA-CL", 20]]);
+  assert.deepEqual(["US-W", "US-WT", "US-M", "US-S", "US-HP", "US-C", "US-MC", "US-MT", "US-ST", "US-L", "US-HSSR", "US-HSSC"].map(count),
+    [267, 267, 12, 28, 11, 31, 34, 12, 28, 125, 333, 141]);
+});
+
+test("section names and labels", () => {
+  const lab = (family, size) => C.lineMetrics({ kind: "section", family, size, length: 1, qty: 1 }).label;
+  assert.equal(lab("SA-UB", "254x146x31"), "UB 254x146x31 (SAISC)");
+  assert.equal(lab("UB", "254x146x31"), "UB 254x146x31 (EN)");
+  assert.equal(lab("IPE", "IPE 200"), "IPE 200 (EN)");          // the prefix is not repeated
+  assert.equal(lab("SA-IPE", "IPE 200"), "IPE 200 (SAISC)");
+  assert.equal(lab("SA-EA", "100x100x10"), "L 100x100x10 (SAISC)");
+  assert.equal(lab("US-W", "W24x68"), "W24x68 (AISC)");
+  assert.equal(lab("US-HSSR", "HSS6x6x5/16"), "HSS6x6x5/16 (AISC)");
+  // EN hot-finished and cold-formed tube share sizes, so their labels say which
+  assert.equal(lab("SHS-HF", "100x100x8"), "SHS 100x100x8 (EN, hot-finished)");
+  assert.equal(lab("SHS-CF", "100x100x8"), "SHS 100x100x8 (EN, cold-formed)");
+  assert.equal(lab("SA-STI", "203x133x25"), "Tee cut from UB 203x133x25 (SAISC)");
+  const m = C.lineMetrics({ kind: "section", family: "US-W", size: "W24x68", length: 1, qty: 1 });
+  assert.equal(m.catalogue, "AISC");
+  assert.equal(m.note, null);
+  // flagged sizes carry their note through to the line
+  const flagged = DB.sections.families.flatMap((f) => f.items.filter((i) => i[C.SECTION.note]).map((i) => [f.id, i]));
+  // AISC: 24 superseded W36/WT18, 40 discontinued HSS and the C3x3.5 mass caveat
+  assert.equal(flagged.filter(([fid]) => /^US-/.test(fid)).length, 65);
+  assert.equal(flagged.filter(([fid]) => /^US-(W|WT)$/.test(fid)).filter(([, i]) => /superseded by W(T18|36)x/.test(i[4])).length, 24);
+  assert.equal(flagged.filter(([fid]) => /^US-HSS/.test(fid)).filter(([, i]) => /not in current AISC/.test(i[4])).length, 40);
+  const [fid, item] = flagged[0];
+  assert.equal(C.lineMetrics({ kind: "section", family: fid, size: item[0], length: 1, qty: 1 }).note, item[C.SECTION.note]);
 });
 
 test("section data: integrity", () => {
@@ -90,7 +175,10 @@ test("section data: integrity", () => {
     const seen = new Set();
     for (const it of f.items) {
       n++;
-      assert.equal(it.length, 4, `${f.id} ${it[0]} row shape`);
+      assert.ok(it.length === 4 || (it.length === 5 && typeof it[4] === "string" && it[4].length > 3), `${f.id} ${it[0]} row shape`);
+      assert.equal(typeof it[0], "string");
+      // decimal point; no trailing zeros except in AISC names, which keep theirs (HSS6.625x0.280)
+      assert.ok(!/,/.test(it[0]) && (f.catalogue === "AISC" || !/\.\d*0(x|$)/.test(it[0])), `${f.id} ${it[0]}: number format`);
       assert.ok(!seen.has(it[0]), `duplicate ${f.id} ${it[0]}`);
       seen.add(it[0]);
       assert.ok(it[1] > 0 && it[2] > 0, `${f.id} ${it[0]} mass/area`);
@@ -100,7 +188,7 @@ test("section data: integrity", () => {
       assert.ok(perTonne > 1.5 && perTonne < 250, `${f.id} ${it[0]} m2/t = ${perTonne.toFixed(1)}`);
     }
   }
-  assert.ok(n > 1000);
+  assert.ok(n > 3000, `${n} rows`);
 });
 
 test("section lines honour the painted-% option", () => {
@@ -309,13 +397,25 @@ test("parseList: pipes, sections, decimal commas, aliases and errors", () => {
     "PIPE,6,12,3",
     "pipe, DN150, 6, 2, 80",
     "PIPE;1-1/2;6,5;4",
-    "UB,254x146x31,6.0,4",
+    "UB,254x146x31,6.0,4",     // SAISC before EN
     "IPE\tIPE 200\t5\t10",
-    "HEB,HEB 300,7,2,80",
-    "SHS,100x100x5,3,2",   // exists in SHS-HF and SHS-CF: larger area used, with a warning
-    "SHS,50x50x3,3,2",     // only in SHS-CF: no warning
+    "HEB,HEB 300,7,2,80",      // only in EN
+    "SHS,100x100x5,3,2",       // SAISC; the EN hot-finished table has 1.1 % more area: warned
+    "SHS-HF,100x100x5,3,2",    // a family id picks that table
     "L,50x50x5,2,10",
+    "W,W24x68,6,1",            // AISC
+    "HSS,HSS6x6x5/16,3,1",
+    "L,4x4x1/2,2,2",
+    "IPE AA,100,4,2",
+    "ipe-aa,IPE AA 120,4,2",
+    "T,152x152x23,3,1",
+    "Tee cut from UC, Tee cut from UC 152x152x23, 3, 1",
+    "EN UB,254x146x31,6,1",    // a catalogue in front picks that table
+    "PFC,260x90,6,1",          // flagged size: its note becomes a warning
+    "HSS;HSS20X12X.625;6;1",   // AISC 2001 spelling, semicolons
+    "SHS;100x100x6,3;3;2",     // decimal comma in the size
     "UB,999x999x9,1,1",
+    "W,WT6x25,1,1",            // a size prefix that contradicts the family is not ignored
     "PIPE,6,x,3",
     "# comment"
   ].join("\n");
@@ -327,21 +427,78 @@ test("parseList: pipes, sections, decimal commas, aliases and errors", () => {
   assert.equal(p6[1].schedule, "80");
   const p15 = byKey((l) => l.size === "1 1/2");
   assert.ok(p15); assert.equal(p15.length, 6.5); assert.equal(p15.qty, 4);
-  assert.ok(byKey((l) => l.family === "UB" && l.size === "254x146x31"));
-  assert.ok(byKey((l) => l.family === "IPE" && l.size === "IPE 200" && l.qty === 10));
+  assert.ok(byKey((l) => l.family === "SA-UB" && l.size === "254x146x31"));
+  assert.ok(byKey((l) => l.family === "SA-IPE" && l.size === "IPE 200" && l.qty === 10));
   const heb = byKey((l) => l.family === "HEB"); assert.equal(heb.paintPct, 80);
-  assert.ok(byKey((l) => l.family === "EA" && l.size === "50x50x5"));
-  const shs = byKey((l) => l.size === "100x100x5");
-  assert.equal(shs.family, "SHS-HF");                      // 0.3871 m2/m beats cold-formed 0.3828
-  assert.equal(byKey((l) => l.size === "50x50x3").family, "SHS-CF");
-  assert.equal(r.warnings.length, 1);
-  assert.match(r.warnings[0].message, /SHS 100x100x5.*SHS-CF and SHS-HF|SHS-HF and SHS-CF/);
+  assert.ok(byKey((l) => l.family === "SA-EA" && l.size === "50x50x5"));
+  assert.ok(byKey((l) => l.family === "SA-SHS" && l.size === "100x100x5"));
+  assert.ok(byKey((l) => l.family === "SHS-HF" && l.size === "100x100x5"));
+  assert.ok(byKey((l) => l.family === "US-W" && l.size === "W24x68"));
+  assert.ok(byKey((l) => l.family === "US-HSSR" && l.size === "HSS6x6x5/16"));
+  assert.ok(byKey((l) => l.family === "US-L" && l.size === "L4x4x1/2"));
+  assert.ok(byKey((l) => l.family === "SA-IPEAA" && l.size === "IPE AA 100"));
+  assert.ok(byKey((l) => l.family === "SA-IPEAA" && l.size === "IPE AA 120"));
+  assert.equal(r.lines.filter((l) => l.family === "SA-STH" && l.size === "152x152x23").length, 2);
+  assert.ok(byKey((l) => l.family === "UB" && l.size === "254x146x31"));
+  assert.ok(byKey((l) => l.family === "US-HSSR" && l.size === "HSS20x12x5/8"));
+  assert.ok(byKey((l) => l.size === "100x100x6.3"));
+  assert.equal(r.warnings.length, 2);
+  assert.match(r.warnings[0].message, /"SHS 100x100x5" the EN Square hollow sections, hot-finished \(SHS\) table gives 1\.1% more area; used SAISC/);
+  assert.match(r.warnings[1].message, /"PFC 260x90": \* Older SAISC section/);
+  assert.equal(r.errors.length, 3);
   assert.ok(r.errors.some((e) => /No section "UB 999x999x9"/.test(e.message)));
+  assert.ok(r.errors.some((e) => /No section "W WT6x25"/.test(e.message)));
   assert.ok(r.errors.some((e) => /positive numbers/.test(e.message)));
   // header and comment rows are skipped silently
   assert.ok(!r.errors.some((e) => /family|comment/.test(e.text)));
   // every parsed line must compute
   for (const l of r.lines) assert.ok(C.lineMetrics(l).ok, JSON.stringify(l));
+});
+
+test("resolveSection: catalogue preference and notes", () => {
+  // a size only EN has falls through to EN; one only AISC has to AISC
+  assert.equal(C.resolveSection("UB", "1016x305x584").family, "UB");
+  assert.equal(C.resolveSection("HP", "HP14x117").family, "US-HP");
+  assert.equal(C.resolveSection("HP", "203x203x45").family, "SA-HP");
+  // within one catalogue the larger area wins and the note says so (EN tube; SAISC has no 40x40x4)
+  const t = C.resolveSection("SHS", "40x40x4");
+  assert.equal(t.family, "SHS-HF");
+  assert.match(t.note, /exists in EN .*hot-finished.* and EN .*cold-formed.*larger area/);
+  // equal areas across catalogues: no note (SAISC and EN IPE 200 are the same section)
+  assert.equal(C.resolveSection("IPE", "IPE 200").note, undefined);
+  // the prefix, spacing and separators of a size do not matter
+  for (const tok of ["254x146x31", "UB254x146x31", "UB 254 x 146 x 31", "254×146×31", "254*146*31"])
+    assert.equal(C.resolveSection("UB", tok).size, "254x146x31", tok);
+  assert.equal(C.resolveSection("W", "w24X68").size, "W24x68");
+  // the same note uses the smaller area as its base: HF 0.6142 is 2.9 % more than CF 0.5971
+  assert.match(C.resolveSection("SHS", "160x160x10").note, /larger area, 2\.9% more/);
+  // equal areas (EN hot-finished and cold-formed CHS are both pi d): no note
+  assert.equal(C.resolveSection("CHS", "48.3x4").note, undefined);
+  // a contradicting size prefix finds nothing; a matching one, or the family's own long prefix, is fine
+  for (const [f, sz] of [["W", "WT6x25"], ["IPE", "IPE AA 200"], ["IPE", "IPE A 200"], ["HEA", "HEM 300"], ["HSS", "L4x4x1/2"],
+    ["L", "SHS 100x100x10"], ["MC", "M6x12"], ["UPN", "IPE 200"]]) assert.equal(C.resolveSection(f, sz), null, `${f} ${sz}`);
+  assert.equal(C.resolveSection("IPE AA", "IPE AA 200").family, "SA-IPEAA");
+  assert.equal(C.resolveSection("STI", "STI 203x133x25").family, "SA-STI");
+  assert.equal(C.resolveSection("Lipped channel", "Lipped channel 75x50x20x2").family, "SA-CC");
+  // AISC 2001 spellings: decimal walls for fractions, leading dots
+  assert.equal(C.resolveSection("HSS", "HSS10X10X.3125").size, "HSS10x10x5/16");
+  assert.equal(C.resolveSection("HSS", "HSS6.625X.280").size, "HSS6.625x0.280");
+  assert.equal(C.resolveSection("L", "L4X4X.5").size, "L4x4x1/2");
+  // ids with spaces, and catalogue-qualified words
+  assert.equal(C.resolveSection("SHS HF", "100x100x5").family, "SHS-HF");
+  assert.equal(C.resolveSection("EN-EA", "100x100x10").family, "EA");
+  assert.equal(C.resolveSection("AISC L", "4x4x1/2").family, "US-L");
+  // every section can be found again from its own label, by its table (EN ids such as UB are also family words, so
+  // the catalogue goes in front) and by its prefix word
+  for (const f of DB.sections.families) for (const it of f.items) {
+    const name = C.sectionName(f, it);
+    const byId = C.resolveSection(`${f.catalogue} ${f.id}`, name);
+    assert.ok(byId && byId.family === f.id && byId.size === it[0], `${f.id} ${name}`);
+    const byWord = C.resolveSection(`${f.catalogue} ${f.prefix}`, it[0]);
+    assert.ok(byWord && C.findFamily(byWord.family).catalogue === f.catalogue, `${f.catalogue} ${f.prefix} ${it[0]}`);
+  }
+  assert.equal(C.resolveSection("PIPE", "6"), null);
+  assert.equal(C.resolveSection("NOPE", "100x100x5"), null);
 });
 
 test("custom members: perimeter in mm, optional mass", () => {
