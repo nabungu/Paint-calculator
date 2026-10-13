@@ -33,9 +33,10 @@
     },
 
     substrates: [
-      { id: "carbon", name: "Carbon steel (blast-cleaned)", table: "Table B.2" },
-      { id: "hdg", name: "Hot-dip galvanized (ISO 1461)", table: "Table B.3" },
-      { id: "tsm", name: "Thermal-sprayed metal (ISO 2063)", table: "Table B.4" }
+      { id: "carbon", name: "Painted steel (blast-cleaned)", table: "Table B.2" },
+      { id: "galv", name: "Hot-dip galvanized only", table: null, paint: false },   // ISO 1461 / ISO 14713-1, data/galvanizing.js
+      { id: "hdg", name: "Duplex: galvanized + paint", table: "Table B.3", galvanized: true },
+      { id: "tsm", name: "Metal spray + paint", table: "Table B.4" }
     ],
 
     // ISO 12944-2 Table 1 (first-year loss of standard specimens; lower bound exclusive, upper inclusive)

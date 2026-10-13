@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-for (const f of ["pipes", "sections-saisc", "sections", "sections-aisc", "paints", "iso12944", "systems"]) require(path.join("..", "data", f + ".js"));
+for (const f of ["pipes", "sections-saisc", "sections", "sections-aisc", "paints", "iso12944", "galvanizing", "systems"]) require(path.join("..", "data", f + ".js"));
 const C = require("../calc.js");
 const DB = globalThis.PaintDB;
 
@@ -536,4 +536,92 @@ test("end to end: small job", () => {
   const expect = layers.reduce((s, l) => s + (area * l.coats * l.dft) / (10 * l.vs) / 0.7, 0);
   close(q.litres, expect, 1e-9);
   assert.equal(q.totalCoats, 3); // C4 High: zinc primer 1 + epoxy mid coat 1 + PUR finish 1
+});
+
+// ---------------------------------------------------------------- hot-dip galvanizing (ISO 1461, ISO 14713-1)
+test("ISO 1461 Tables 3 and 4: minimum thickness and mass", () => {
+  const b = (id) => C.galvBand(id);
+  assert.deepEqual([b("s6").local, b("s6").mean, b("s6").massLocal, b("s6").massMean], [70, 85, 505, 610]);
+  assert.deepEqual([b("s3").local, b("s3").mean], [55, 70]);
+  assert.deepEqual([b("s15").local, b("s15").mean], [45, 55]);
+  assert.deepEqual([b("s0").local, b("s0").mean], [35, 45]);
+  assert.deepEqual([b("c6").mean, b("c0").mean, b("th6").mean, b("th0").mean, b("cf3").mean, b("cf0").mean], [80, 70, 50, 25, 55, 45]);
+  // every printed mass is the thickness x 7.2, rounded by the table to a multiple of 5 (40 um prints 285, not 290)
+  for (const x of DB.galvanizing.bands) for (const [um, g] of [[x.local, x.massLocal], [x.mean, x.massMean]])
+    assert.ok(Math.abs(um * 7.2 - g) <= 3 && g % 5 === 0, `${x.id} ${um} um vs ${g} g/m2`);
+  // band edges: > 6 mm, > 3 to <= 6, >= 1.5 to <= 3, < 1.5
+  assert.deepEqual([12, 6.1, 6, 3.1, 3, 1.5, 1.4].map((t) => C.bandForThickness(t).id), ["s6", "s6", "s3", "s3", "s15", "s15", "s0"]);
+  assert.equal(C.bandForThickness(0), null);
+});
+
+test("ISO 1461 compliance check", () => {
+  assert.equal(C.galvCheck(85, "s6").status, "ok");
+  assert.equal(C.galvCheck(84, "s6").status, "local");      // above 70 local, below 85 mean: fails on the mean
+  assert.equal(C.galvCheck(84, "s6").ok, false);
+  assert.equal(C.galvCheck(69, "s6").status, "fail");
+  assert.equal(C.galvCheck(70, "s3").status, "ok");
+  assert.equal(C.galvCheck(85, "nope"), null);
+});
+
+test("zinc life to first maintenance (ISO 14713-1 with ISO 9223 rates)", () => {
+  const life = (um, env) => C.lifeText(C.zincLife(um, env));
+  // 85 um: C3 at least 40 years (the ArcelorMittal guide's example), C4 20-40, C5 10-20, CX 3-10
+  assert.equal(life(85, "C3"), "40 to > 100 years");
+  assert.equal(life(85, "C4"), "20\u201340 years");
+  assert.equal(life(85, "C5"), "10\u201320 years");
+  assert.equal(life(85, "CX"), "3\u201310 years");
+  assert.equal(life(85, "C2"), "> 100 years");               // 85 / 0.7 = 121: capped
+  assert.equal(life(85, "C1"), "> 100 years");               // C1 has no lower rate
+  assert.equal(life(200, "C4"), "47\u201395 years");
+  const l = C.zincLife(85, "C4");
+  assert.deepEqual([l.min, l.max, l.rate], [20, 40, [2.1, 4.2]]);
+  // immersion and buried: no life, specialist advice
+  for (const e of ["Im1", "Im2", "Im3", "Im4"]) assert.equal(C.zincLife(85, e).kind, "imm");
+  // durability check on the shorter life: VH needs 25 years, H 15, M 7
+  assert.equal(C.lifeMeets(C.zincLife(85, "C3"), "VH"), true);
+  assert.equal(C.lifeMeets(C.zincLife(85, "C4"), "VH"), false);
+  assert.equal(C.lifeMeets(C.zincLife(85, "C4"), "H"), true);
+  assert.equal(C.lifeMeets(C.zincLife(85, "Im2"), "L"), false);
+  // galvanizing alone offers every environment and durability
+  assert.deepEqual(C.durabilitiesFor("galv", "Im2"), ["L", "M", "H", "VH"]);
+  assert.deepEqual(C.durabilitiesFor("galv", "CX"), ["L", "M", "H", "VH"]);
+});
+
+test("zinc mass, volume and added weight", () => {
+  const q = C.zincQuantities(100, 85, 5000);
+  assert.equal(q.gm2, 612);                                  // 85 x 7.2
+  close(q.kg, 61.2, 1e-9);                                    // 100 m2 x 612 g/m2
+  close(q.litres, 8.5, 1e-9);                                 // 100 m2 x 85 um
+  close(q.pctOfSteel, 1.224, 1e-9);
+  assert.equal(C.zincQuantities(10, 85, null).pctOfSteel, null);
+  // a tube is galvanized inside too: inside perimeter = outside - 2 pi t
+  const shs = C.galvAreaPerM({ kind: "section", family: "SA-SHS", size: "100x100x4", length: 1, qty: 1 }, true);
+  close(shs.inner, 0.3863 - (2 * Math.PI * 4) / 1000, 1e-12);
+  assert.equal(C.galvAreaPerM({ kind: "section", family: "SA-SHS", size: "100x100x4", length: 1, qty: 1 }, false).inner, 0);
+  assert.equal(C.galvAreaPerM({ kind: "section", family: "SA-UB", size: "254x146x31", length: 1, qty: 1 }, true).inner, 0);
+  const pipe = C.galvAreaPerM({ kind: "pipe", size: "6", schedule: "40", surfaces: "ext", length: 1, qty: 1 }, true);
+  close(pipe.inner, (Math.PI * (168.3 - 2 * 7.11)) / 1000, 1e-12);
+  // area of a list with the allowance, and the weight of one piece
+  const lines = [{ kind: "section", family: "SA-UB", size: "254x146x31", length: 6, qty: 2 }, { kind: "section", family: "SA-SHS", size: "100x100x4", length: 3, qty: 1 }];
+  const a = C.galvArea(lines, 10, true);
+  close(a.outer, C.findSection("SA-UB", "254x146x31")[2] * 12 + 0.3863 * 3, 1e-9);
+  close(a.total, a.base * 1.1, 1e-9);
+  const p = C.pieceWeights(lines[0], 85, true);
+  close(p.zinc, (C.findSection("SA-UB", "254x146x31")[2] * 6 * 85 * 7.2) / 1000, 1e-9);
+  close(p.total, p.steel + p.zinc, 1e-9);
+});
+
+test("steel element thickness for the ISO 1461 band", () => {
+  const t = (line) => C.elementThickness(line);
+  assert.deepEqual(t({ kind: "section", family: "SA-UB", size: "254x146x31" }), { min: 6, max: 8.6 });     // web, flange
+  assert.deepEqual(t({ kind: "section", family: "SA-EA", size: "50x50x5" }), { min: 5, max: 5 });          // angle leg
+  assert.deepEqual(t({ kind: "section", family: "SA-SHS", size: "100x100x4" }), { min: 4, max: 4 });       // wall
+  assert.deepEqual(t({ kind: "section", family: "SA-CC", size: "100x50x20x2" }), { min: 2, max: 2 });      // lipped: last
+  assert.deepEqual(t({ kind: "pipe", size: "6", schedule: "40" }), { min: 7.11, max: 7.11 });
+  assert.equal(t({ kind: "custom", perimeter: 200 }), null);
+  // every section in every catalogue yields a positive thickness
+  for (const f of DB.sections.families) for (const it of f.items) {
+    const x = t({ kind: "section", family: f.id, size: it[0] });
+    assert.ok(x && x.min > 0 && x.max >= x.min && x.max <= 140, `${f.id} ${it[0]}`);   // UC 356x406x1086 flange 140
+  }
 });

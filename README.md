@@ -3,7 +3,9 @@
 Enter a list of pipes and steel members, pick an ISO 12944 environment and durability, and get the total surface
 area, the paint systems that qualify (from Jotun's *ISO 12944 Coating Selector*), and the litres of **primer, mid coat
 and finish** with the number of coats and film thickness of each layer. Every build, including one you edit, is
-checked live against the minimum requirements of ISO 12944-5.
+checked live against the minimum requirements of ISO 12944-5. For **hot-dip galvanizing** it checks the coating
+against ISO 1461 (SANS 121) and gives the zinc mass, the weight each piece gains and the life to first maintenance
+(ISO 14713-1).
 
 Open `index.html` in a browser. It is plain HTML, CSS and JavaScript with no build step and no network access, and
 it keeps your list in the browser's `localStorage`.
@@ -25,7 +27,8 @@ it keeps your list in the browser's `localStorage`.
    `HSS6X6X.3125` and decimal commas (`100x100x6,3`) are understood. Sizes marked * (legacy, superseded, etc.) are
    listed in the import messages.
 2. **Environment and system.**
-   * Pick the substrate (blast-cleaned carbon steel, hot-dip galvanized, thermal-sprayed metal), the environment
+   * Pick the protection (painted blast-cleaned steel; hot-dip galvanized only; duplex, i.e. galvanized and painted;
+     paint over thermal-sprayed metal), the environment
      (C1–C5 and CX in air; Im1–Im3 in water or soil; Im4) and the durability you need. *Not sure?* works the category
      out from measured first-year corrosion of steel or zinc specimens (ISO 12944-2 Table 1).
    * Every Jotun system from the selector that reaches that durability is listed, least paint first, with the litres
@@ -37,11 +40,25 @@ it keeps your list in the browser's `localStorage`.
      those combinations are nobody's certified system). Alkyd systems drop out for them (no alkyd products).
    * Notes give the surface preparation for the substrate and primer (Table B.1, ISO 12944-4), inspection limits and
      ISO 12944-3 design points.
+   * **Hot-dip galvanized only** shows no paint systems. Pick the steel thickness (or let the member list set it from
+     its thickest steel) and the mean coating thickness (blank = the ISO 1461 minimum). The panel:
+     * checks the coating against ISO 1461 Table 3 or 4 (steel > 6 mm: 85 µm mean, 70 µm local) and flags it if
+       it is below;
+     * gives the life to first maintenance as thickness ÷ zinc loss, using the top and the bottom of the
+       category's ISO 9223 rate band, shown as "> 100 years" beyond 100 (85 µm in C4: 20–40 years). It compares
+       the shorter life with the durability asked for and says how much zinc would reach it;
+     * for Im1–Im4, gives no life figure: specialist advice, consider duplex.
+
+     **Duplex** shows the same zinc panel above the ISO 12944 Table B.3 paint systems.
 3. **Allowances.** Application loss (default 30 %) and extra area for flanges, cleats and fittings.
 4. **Results.** Total, pipe and steel area, steel mass, and for each layer: coats × DFT, wet film, coverage,
    litres per coat, theoretical litres and litres with loss; whole litres to order per product; and a
    **specification summary** (environment, preparation, system, NDFT, ISO compliance, inspection) to copy into a
-   document. CSV download and print.
+   document. CSV download and print. With galvanizing:
+   * coating mass (g/m² = µm × 7.2);
+   * zinc on the job (kg) and its volume, including the inside of tubes and pipes;
+   * added weight as a % of the steel;
+   * steel, zinc and galvanized weight per piece, for transport and lifting.
 
 ## The maths
 
@@ -54,6 +71,10 @@ it keeps your list in the browser's `localStorage`.
 | Litres to buy | litres ÷ (1 − loss %) |
 | Wet film | DFT ÷ volume solids |
 | Pipe mass | π × 7850 × (OD − t) × t (kg/m, mm units) |
+| Zinc coating mass | thickness (µm) × 7.2 g/m² (coating density 7.2 g/cm³, ISO 1461) |
+| Zinc on the job | galvanized area × coating mass; volume = area × thickness |
+| Galvanized area | outside area + inside of tubes and pipes (outside perimeter − 2πt), + allowance |
+| Zinc life | thickness ÷ ISO 9223 zinc rate: top of band → shorter life, bottom → longer; > 100 years capped |
 
 Check: 100 m² at 100 µm and 80 % solids is 12.5 L theoretical (8 m²/L, Jotamastic 90's published rate).
 
@@ -167,6 +188,17 @@ Carbothane 134 / HP / HS / HG). Confirm each product against the supplier's curr
 * Several per-coat ranges (Barrier 80, Barrier, Penguard HSP ZP, Pilot II, Pioner, Penguard Pro GF) are the range
   Jotun's selector uses, because the data sheet range was not seen.
 * The selector allows "Penguard HSP ZP or Penguard Express ZP"; only HSP ZP's solids (73 %) were found, so it is used.
+
+**Hot-dip galvanizing (`data/galvanizing.js`).**
+* ISO 1461:2009 Tables 3 and 4 (minimum local and mean thickness and mass) and the 7.2 g/cm³ coating density, read
+  from the standard.
+* The zinc rate bands are ISO 9223's first-year rates; they are the same as ISO 12944-2 Table 1.
+* The life method is the one ISO 1461 Annex E refers to (ISO 14713-1). ISO 14713-1 itself was not available; the
+  results agree with ArcelorMittal's guide *Corrosion protection of rolled steel sections using hot-dip
+  galvanization* (85 µm in C3: at least 40 years). That guide also gives the duplex factor of 1.2–1.5.
+* First-year rates are conservative (ISO 9224 gives lower long-term rates).
+* Real coatings on reactive steel are often well above the minimum, so zinc pickup can be higher than calculated.
+* SANS equivalents and HDGASA guidance are listed in the app's notes.
 
 Not covered: galvanized or metal-sprayed steel in immersion, CX on galvanizing, the sealer coat on metal spray,
 stripe coats, pack sizes, prices.

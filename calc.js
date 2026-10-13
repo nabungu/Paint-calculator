@@ -275,6 +275,7 @@
   function durabilitiesFor(substrate, envId) {
     const e = getEnv(envId);
     if (!e) return [];
+    if (substrate === "galv") return durs();     // galvanizing only: every environment, life from the zinc rate
     if (e.kind === "part9") return substrate === "carbon" ? ["H"] : [];
     const reqs = requirementsFor(substrate, envId);
     if (!reqs) return [];
@@ -389,6 +390,112 @@
       theoretical: rows.reduce((s, r) => s + r.theoretical, 0),
       litres: rows.reduce((s, r) => s + r.litres, 0)
     };
+  }
+
+  // ------------------------------------------------------------------ hot-dip galvanizing (ISO 1461, ISO 14713-1)
+  const galv = () => db().galvanizing;
+  function galvBand(id) {
+    return galv().bands.find((b) => b.id === id) || null;
+  }
+  /** ISO 1461 Table 3 band for uncentrifuged steel of thickness t mm (null when t is unknown). */
+  function bandForThickness(t) {
+    if (!(t > 0)) return null;
+    return galv().bands.find((b) => b.table === 3 && b.tMax !== undefined &&
+      (b.lowIncl ? t >= b.tMin : t > b.tMin) && t <= b.tMax) || null;
+  }
+  /**
+   * Thinnest and thickest steel element of a line, mm: the web and flange of I-sections, channels and tees, the leg of
+   * an angle, the wall of a tube, lipped section or pipe. Null for custom members (no thickness known).
+   */
+  function elementThickness(line) {
+    if (line.kind === "pipe") {
+      const p = findPipe(line.size), t = p && p.walls[line.schedule];
+      return t ? { min: t, max: t } : null;
+    }
+    if (line.kind !== "section") return null;
+    const fam = findFamily(line.family), it = fam && findSection(line.family, line.size);
+    if (!it) return null;
+    const n = String(it[SECTION.dims]).split("×").map(Number);
+    if (n.some((x) => !(x > 0))) return null;
+    const ts = ["I-sections", "Channels", "Tees"].includes(fam.group) && n.length >= 4 ? [n[2], n[3]] : [n[n.length - 1]];
+    return { min: Math.min(...ts), max: Math.max(...ts) };
+  }
+  /**
+   * ISO 1461 check of a mean coating thickness for a band: ok when at least the mean minimum; "local" when below the
+   * mean but at least the local minimum; "fail" below both.
+   */
+  function galvCheck(um, bandId) {
+    const b = galvBand(bandId);
+    if (!b) return null;
+    const t = num(um);
+    const status = t >= b.mean ? "ok" : t >= b.local ? "local" : "fail";
+    return { band: b, um: t, status, ok: status === "ok", mean: b.mean, local: b.local, massMean: b.massMean, massLocal: b.massLocal };
+  }
+  /**
+   * Life to first maintenance of a zinc coating (ISO 14713-1): thickness / first-year zinc rate (ISO 9223 band).
+   * Returns { kind: "atm", rate: [lo, hi], min, max } in whole years (Infinity above the cap) or { kind: "imm" }.
+   */
+  function zincLife(um, envId) {
+    const e = getEnv(envId);
+    if (!e) return null;
+    if (!e.zincUm) return { kind: "imm", env: e };
+    const t = num(um), cap = galv().lifeCap, [lo, hi] = e.zincUm;
+    const years = (rate) => { if (!(rate > 0)) return Infinity; const y = Math.floor(t / rate); return y > cap ? Infinity : y; };
+    return { kind: "atm", env: e, rate: [lo, hi], min: years(hi), max: years(lo) };
+  }
+  const yearsText = (y) => (y === Infinity ? `> ${galv().lifeCap}` : String(y));
+  /** "40 to > 100 years", "20–40 years", "> 100 years". */
+  function lifeText(life) {
+    if (!life || life.kind !== "atm") return "";
+    if (life.min === life.max) return `${yearsText(life.min)} years`;
+    return life.max === Infinity ? `${life.min} to > ${galv().lifeCap} years` : `${life.min}\u2013${life.max} years`;
+  }
+  // ISO 12944-1 durability classes as years: low up to 7, medium 7 to 15, high 15 to 25, very high over 25
+  const DUR_YEARS = { L: 0, M: 7, H: 15, VH: 25 };
+  /** True when the shorter life reaches the lower bound of the durability class asked for. */
+  const lifeMeets = (life, dur) => !!life && life.kind === "atm" && life.min >= (DUR_YEARS[dur] || 0);
+  /** Zinc on a job: coating mass g/m2 (= um x 7.2), total kg, volume litres, and that as a share of the steel. */
+  function zincQuantities(area, um, steelKg) {
+    const t = num(um), gm2 = t * galv().density;
+    const kg = (num(area) * gm2) / 1000;
+    return { um: t, gm2, kg, litres: (num(area) * t) / 1000, pctOfSteel: steelKg > 0 ? (kg / steelKg) * 100 : null };
+  }
+  /**
+   * Area per metre a galvanizing bath coats, m2/m: the painted (outer) area, plus, when inside is true, the inside of
+   * tubes and pipes, which the zinc reaches through the vent holes. With concentric corners the inside perimeter is
+   * the outside perimeter less 2 pi t (exact for round tube, and for square and rectangular tube with ri = ro - t).
+   */
+  function galvAreaPerM(line, inside) {
+    const m = lineMetrics(line);
+    if (!m.ok) return null;
+    let perM = m.areaPerM, inner = 0;
+    if (inside) {
+      if (line.kind === "pipe" && line.surfaces !== "both") inner = pipeInternalPerM(findPipe(line.size), line.schedule) || 0;
+      if (line.kind === "section" && (findFamily(line.family) || {}).group === "Hollow sections") {
+        const t = elementThickness(line);
+        if (t) inner = Math.max(0, findSection(line.family, line.size)[SECTION.area] - (2 * Math.PI * t.max) / 1000);
+      }
+    }
+    return { outer: perM, inner, total: perM + inner, label: m.label, massPerM: m.massPerM };
+  }
+  /** Galvanized area of a list: outer and inside areas, then the % allowance on the sum (fittings are dipped too). */
+  function galvArea(lines, allowancePct, inside) {
+    let outer = 0, inner = 0;
+    for (const line of lines) {
+      const g = galvAreaPerM(line, inside);
+      if (!g) continue;
+      const len = num(line.length) * num(line.qty);
+      outer += g.outer * len; inner += g.inner * len;
+    }
+    const base = outer + inner;
+    return { outer, inner, base, total: base * (1 + num(allowancePct) / 100) };
+  }
+  /** Weight of one piece of a line before and after galvanizing, kg (null when the steel mass is unknown). */
+  function pieceWeights(line, um, inside) {
+    const g = galvAreaPerM(line, inside);
+    if (!g || g.massPerM === null) return null;
+    const length = num(line.length), zinc = (g.total * length * num(um) * galv().density) / 1000;
+    return { label: g.label, qty: num(line.qty), steel: g.massPerM * length, zinc, total: g.massPerM * length + zinc };
   }
 
   // ------------------------------------------------------------------ bulk import
@@ -566,6 +673,7 @@
     getSupplier, getProduct, pickProduct, paintQuantities,
     getEnv, systemsFor, getLibrarySystem, systemLayers, requirementsFor, assess, durabilitiesFor,
     productWarnings, checkLayers, recommend, categoryFromLoss,
+    galvBand, bandForThickness, elementThickness, galvCheck, zincLife, lifeText, lifeMeets, zincQuantities, galvAreaPerM, galvArea, pieceWeights,
     resolvePipe, resolveSection, normSize, parseList
   };
 });
