@@ -453,7 +453,7 @@
     }
     if (!a.applicable) { fill(el, h("div", { class: "head" }, h("b", {}, "ISO 12944-5 check: "), a.reason || "not applicable")); return a; }
     const want = ISO.durabilities.indexOf(state.dur), got = a.achieved ? ISO.durabilities.indexOf(a.achieved) : -1;
-    const sys = currentSystem(), testedPick = sys && sys.basis === "tested" && !isEdited();
+    const sys = currentSystem(), testedPick = sys && sys.basis === "tested" && !isEdited() && got < want;
     fill(el,
       testedPick ? h("div", { class: "head", style: "margin-bottom:6px" }, h("b", {}, `Rated ${ISO.durability[sys.dur].label.toLowerCase()} by ${supplierOf(sys)} from performance testing. `),
         `${sysName(sys.id)} is the supplier's tested system (ISO 12944-6); its rating does not come from the ISO 12944-5 minimum-thickness tables below.`) : null,

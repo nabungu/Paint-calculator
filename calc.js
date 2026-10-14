@@ -327,6 +327,11 @@
    * Library systems that reach `dur` in the environment, with the supplier's products, least paint first.
    * Each entry: { system, layers, litres (for area, or per 100 m2 when area is 0), totalDft, coats, missing, warnings }.
    */
+  /** True when ISO 12944-5 Annex B alone allows durability dur for a system's build. */
+  function annexAllows(layers, sys, dur) {
+    const a = assess(layers, sys.substrate, sys.env);
+    return a.applicable && a.achieved !== null && durIndex(a.achieved) >= durIndex(dur);
+  }
   /**
    * Systems that reach a durability, least paint first. A supplier with systems of its own for the environment gets
    * those; one without (or with none for this case) gets Jotun's builds with its own products substituted by type.
@@ -343,7 +348,10 @@
       out.push({
         system: sys, layers, litres: q.litres, totalDft: q.totalDft, coats: q.totalCoats,
         missing: layers.some((l) => !l.productId), warnings: productWarnings(layers, supplier),
-        substituted: sys.supplier !== supplier, tested: sys.basis === "tested"
+        substituted: sys.supplier !== supplier,
+        // "tested" only where Annex B does not already allow what is asked: a build PPG stars at high but rates very
+        // high from testing is an Annex B system for a high requirement
+        tested: sys.basis === "tested" && !annexAllows(layers, sys, dur || sys.dur)
       });
     }
     // systems that meet the Annex B minimums before those rated on test results alone

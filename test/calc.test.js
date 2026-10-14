@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-for (const f of ["pipes", "sections-saisc", "sections", "sections-aisc", "paints", "iso12944", "galvanizing", "systems"]) require(path.join("..", "data", f + ".js"));
+for (const f of ["pipes", "sections-saisc", "sections", "sections-aisc", "paints", "iso12944", "galvanizing", "systems", "systems-ppg"]) require(path.join("..", "data", f + ".js"));
 const C = require("../calc.js");
 const DB = globalThis.PaintDB;
 
