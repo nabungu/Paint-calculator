@@ -382,7 +382,13 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
       <li><b>Structural steel, EN / BS and AISC.</b> The European and British ranges (UB/UC to BS 4, IPE and HE to EN 10365, PFC, UPN to DIN 1026, EN 10056 angles, EN 10210 and EN 10219 hollow sections) and the AISC (US imperial) W, M, S, HP, C, MC, angle, tee and HSS shapes of the AISC 2001 shape list, with v16 dimensions; their areas are computed from the dimensions too, except that W, M, S and HP use AISC's published perimeter. When a pasted list names a size that is in more than one catalogue, the SAISC row is used and a note says if another table differs by more than 1 %. Sizes marked * carry a note (a legacy, superseded or discontinued size, hot-finished corner radii, or a mass caveat); check availability and anything that matters against the mill's current tables. Members not listed (flats, plate, welded sections) go in as <i>Custom member</i> with their perimeter.</li>
       <li><b>Hot-dip galvanizing.</b> Minimum coating thickness and mass from ISO 1461 (SANS 121) Tables 3 and 4, by steel thickness; coating mass = thickness × 7.2 g/cm³ (ISO 1461). Life to first maintenance is the coating thickness divided by the zinc corrosion rate of the category (ISO 9223 first-year rates, the method of ISO 14713-1), from the top and bottom of the rate band, and shown as "> 100 years" beyond 100. These first-year rates are conservative and the micro-climate matters more than the category: confirm on site (HDGASA publishes Southern African guidance). Immersion and buried service get no life figure. Tubes and pipes are counted as galvanized inside as well (inside perimeter = outside − 2πt). Real coatings are often thicker than the minimum, so actual zinc pickup and weight can be higher: ask the galvanizer. ISO 14713-1 itself was not available; the method is the one ISO 1461 Annex E points to, and the duplex factor of 1.2–1.5 is from ArcelorMittal's guide to galvanizing rolled sections.</li>
       <li><b>ISO 12944.</b> Category bands and examples follow ISO 12944-2 Table 1 and Table 2. Every paint system is checked against the minimum number of coats and minimum NDFT in ISO 12944-5 Annex B (Table B.2 carbon steel, B.3 galvanized, B.4 thermal-sprayed metal, B.5 immersion); the primer decides which column applies. Surface preparation follows Table B.1 and ISO 12944-4, design notes ISO 12944-3. Offshore CX and Im4 are qualified by testing to ISO 12944-9 (not available here), so only Jotun's tested systems are listed for them.</li>
-      <li><b>Systems.</b> The library is Jotun's <i>ISO 12944 Coating Selector, rev. 2</i>: every carbon-steel, galvanized, metal-spray, immersion and offshore system it lists whose products' solids are known. For each one, the durability ISO 12944-5 allows matches the class Jotun ticks; the tests check this for all of them. Choosing Carboline or PPG keeps Jotun's builds but substitutes that supplier's product of the same type: those combinations are not certified by anyone.</li>
+      <li><b>Systems.</b> Each supplier's own published ISO 12944 systems:
+        <ul>
+          <li><b>Jotun</b>, <i>ISO 12944 Coating Selector rev. 2</i>: 84 systems on carbon steel, galvanizing, metal spray and immersion, plus tested CX and Im4 systems.</li>
+          <li><b>Hempel</b>, <i>How to select the right paint system</i> (Oct 2023): 107 systems on carbon steel and galvanizing, including CX.</li>
+          <li><b>PPG</b>, <i>ISO 12944 global system selector</i> (2023): 49 systems on carbon steel, C2 to C5.</li>
+        </ul>
+        Every system is checked against the ISO 12944-5 Annex B minimum coats and thickness. Systems a supplier rates higher than Annex B allows (from ISO 12944-6 performance testing) are marked "tested". Systems needing a product whose volume solids could not be found are left out. Carboline has no systems of its own here yet, so with Carboline selected Jotun's builds are shown with Carboline products of the same type: those combinations are not certified by anyone.</li>
       <li><b>Paint products.</b> Volume solids and recommended film thickness come from supplier data-sheet extracts and distributor copies (the supplier websites could not be opened directly). Every product carries a note of what was seen (hover the product name); a few ranges are taken from how Jotun's selector uses the product, and Penguard Pro's solids are derived from its published spreading rates. Confirm each against the current data sheet.</li>
       <li><b>Arithmetic.</b> Litres = area × DFT ÷ (10 × volume solids %), then ÷ (1 − loss). One coat of 100 µm at 80 % solids covers 8 m²/L theoretically. Wet film = DFT ÷ solids. Quantities are rounded up to whole litres only in the "to order" column; pack sizes are not modelled.</li>
       <li><b>Not modelled:</b> pack sizes and prices, thinner, the sealer coat on metal spray, mist coats on zinc silicate, over-thickness, shop versus field application, stripe coats.</li>
@@ -430,10 +436,12 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
 <script src="data/sections.js"></script>
 <script src="data/sections-aisc.js"></script>
 <script src="data/paints.js"></script>
+<script src="data/paints-hempel.js"></script>
 <script src="data/iso12944.js"></script>
 <script src="data/galvanizing.js"></script>
 <script src="data/systems.js"></script>
 <script src="data/systems-ppg.js"></script>
+<script src="data/systems-hempel.js"></script>
 <script src="calc.js"></script>
 <script src="app.js"></script>
 </body>

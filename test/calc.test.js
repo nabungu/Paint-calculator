@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-for (const f of ["pipes", "sections-saisc", "sections", "sections-aisc", "paints", "iso12944", "galvanizing", "systems", "systems-ppg"]) require(path.join("..", "data", f + ".js"));
+for (const f of ["pipes", "sections-saisc", "sections", "sections-aisc", "paints", "paints-hempel", "iso12944", "galvanizing", "systems", "systems-ppg", "systems-hempel"]) require(path.join("..", "data", f + ".js"));
 const C = require("../calc.js");
 const DB = globalThis.PaintDB;
 
@@ -386,6 +386,37 @@ test("recommend: only systems that reach the durability, least paint first", () 
   assert.ok(c[0].layers.every((l) => l.productId.startsWith("carboline-")));
   // galvanized C5 very high: Jotun's selector has exactly one system (G5.05)
   assert.deepEqual(C.recommend({ substrate: "hdg", env: "C5", dur: "VH", supplier: "jotun", area: 10, lossPct: 0 }).map((x) => x.system.id), ["G5.05"]);
+});
+
+test("recommend: each supplier's own systems, and the tested badge only where Annex B falls short", () => {
+  const rec = (supplier, env, dur, substrate = "carbon") => C.recommend({ substrate, env, dur, supplier, area: 100, lossPct: 30 });
+  for (const sup of ["ppg", "hempel"]) {
+    const r = rec(sup, "C4", "H");
+    assert.ok(r.length >= 5, `${sup} C4 H: ${r.length}`);
+    for (const x of r) {
+      assert.equal(x.system.supplier, sup);
+      assert.equal(x.substituted, false);
+      assert.ok(x.layers.every((l) => l.productId.startsWith(sup + "-")), x.system.id);
+    }
+    // systems that meet Annex B come before the tested ones
+    const firstTested = r.findIndex((x) => x.tested);
+    assert.ok(firstTested < 0 || r.slice(firstTested).every((x) => x.tested), `${sup}: tested systems last`);
+  }
+  // PPG C4.11/3 is rated very high from testing but meets Annex B at high: no badge when high is asked
+  const ppgH = rec("ppg", "C4", "H").find((x) => x.system.id === "C4.11/3");
+  const ppgVH = rec("ppg", "C4", "VH").find((x) => x.system.id === "C4.11/3");
+  assert.equal(ppgH.tested, false);
+  assert.equal(ppgVH.tested, true);
+  // Hempel galvanized and CX systems
+  assert.ok(rec("hempel", "C5", "VH", "hdg").some((x) => x.system.id === "HEM C5-VH-10"));
+  assert.ok(rec("hempel", "CX", "H").length >= 10);
+  // Carboline has no systems of its own: Jotun's builds with Carboline products
+  const cb = rec("carboline", "C4", "H");
+  assert.ok(cb.length && cb.every((x) => x.substituted && x.system.supplier === "jotun"));
+  // suppliers with systems in the library
+  assert.deepEqual(C.systemSuppliers().sort(), ["hempel", "jotun", "ppg"]);
+  assert.equal(DB.systems.filter((s) => s.supplier === "ppg").length, 49);
+  assert.equal(DB.systems.filter((s) => s.supplier === "hempel").length, 107);
 });
 
 test("checkLayers: product ranges, zinc primer range and shortfall wording", () => {

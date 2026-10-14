@@ -176,6 +176,18 @@ ISO 12944-5 Annex B allows equals the durability Jotun ticks** (a test checks th
 other. Offshore systems are included only where every product's solids are known (2 of 7 zinc-primer CX systems, 1
 splash-zone system, and 2 Im4 systems).
 
+**Hempel and PPG systems (`data/systems-hempel.js`, `data/paints-hempel.js`, `data/systems-ppg.js`).**
+* Hempel: 107 systems from *How to select the right paint system* (ISO 12944, Oct 2023), including galvanized and
+  CX systems. Polyaspartic systems and others needing a product whose solids could not be found are left out (each
+  listed in the file header).
+* PPG: 49 systems from the *ISO 12944 global system selector* (2023), with PPG's numbers. Solids come from the
+  selector's own product table, checked against data sheets.
+* Each system's `basis` is `annexB` when ISO 12944-5 Annex B allows the supplier's rating, and `tested` when the
+  supplier rates it higher from ISO 12944-6 / -9 testing. The app marks a system "tested" only when Annex B falls
+  short of the durability asked for. A test checks every system's basis against Annex B.
+* With a supplier selected, the list shows that supplier's own systems. Carboline has none yet, so it gets Jotun's
+  builds with Carboline products substituted.
+
 **Paint products (`data/paints.js`).** Volume solids and recommended DFT per coat come from Jotun, Carboline and PPG data
 sheets. **The supplier websites could not be opened while building this**: the figures were collected from
 search-engine extracts of the sheets and from distributor copies. Each product has a `source` note saying what was seen
