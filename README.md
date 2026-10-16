@@ -215,6 +215,33 @@ Carbothane 134 / HP / HS / HG). Confirm each product against the supplier's curr
 Not covered: galvanized or metal-sprayed steel in immersion, CX on galvanizing, the sealer coat on metal spray,
 stripe coats, pack sizes, prices.
 
+## Excel workbook
+
+`excel/Paint-Galvanizing-Calculator.xlsx` is the same calculator as an Excel workbook (Microsoft 365, or Excel 2010
+or later), formulas only, no macros.
+* **Members:** pick the member type and size from drop-down lists, type the quantity and length.
+* **Protection:** the protection, environment, durability and supplier. The qualifying systems list themselves, least
+  paint first; pick one and change any layer in the yellow "Your …" columns. The ISO 12944-5 check and the
+  galvanizing panel (ISO 1461 check, life to first maintenance) update as you type.
+* **Results:** areas, litres per layer and to order, zinc quantities and a specification summary. The weight of each
+  galvanized piece is in the last columns of Members.
+
+It is generated from the same `data/*.js` files as the page, so the two always agree:
+
+```
+node tools/export_data.js > /tmp/paintdb.json
+python3 tools/build_xlsx.py /tmp/paintdb.json excel/Paint-Galvanizing-Calculator.xlsx
+```
+
+Rebuild it after any change to the data. It was checked against `calc.js` (recalculated in LibreOffice) for:
+* the Jotun, PPG, Hempel and Carboline system lists, their order, litres and "tested" flags;
+* immersion and CX;
+* galvanizing area, zinc mass, life and the ISO 1461 check;
+* an edited layer;
+* custom members.
+
+Pasting a free-text list is not supported in the workbook: pick sizes from the lists.
+
 ## Editing the database
 
 Everything is data in `data/*.js`; the app and tests pick up edits to these files automatically (a new section file needs registering, see below).
