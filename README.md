@@ -12,8 +12,10 @@ it keeps your list in the browser's `localStorage`.
 
 ## What it does
 
-1. **Members.** Add pipe by NPS/schedule (ASME B36.10M), a steel section, or a custom member (flat bar, plate,
-   welded section: type the perimeter). Sections come from three catalogues, listed in this order:
+1. **Members.** Add pipe by NPS/schedule (ASME B36.10M), a buttwelding pipe fitting (ASME B16.9), a steel section, or
+   a custom member (flat bar, plate, welded section: type the perimeter). Fittings are counted by the piece: long and
+   short radius and 3D elbows (90° and 45°), long radius reducing elbows, 180° returns, equal and reducing tees and
+   crosses, concentric and eccentric reducers, caps and lap joint stub ends. Sections come from three catalogues, listed in this order:
    * **SAISC**: UB, UC, H-bearing piles, IPE, IPE AA, ITF joists, PFC, UPN and BS taper channels, equal and unequal
      angles, tees cut from UB and UC, SHS, RHS, CHS, and cold-formed lipped channels, Z and angles;
    * **EN / BS**: UB, UC, IPE, IPE A/O, HEA/HEB/HEM, PFC, UPN, angles, hot-finished and cold-formed hollow sections;
@@ -25,19 +27,23 @@ it keeps your list in the browser's `localStorage`.
    (`EN UB`, `AISC L`) or give a table's own id (`SA-UB`, `SHS-HF`, `HEB`, `US-W`) to use one table. A prefix written in
    the size must match the family: `W, WT6x25` is rejected rather than read as W6x25. AISC 2001 spellings such as
    `HSS6X6X.3125` and decimal commas (`100x100x6,3`) are understood. Sizes marked * (legacy, superseded, etc.) are
-   listed in the import messages.
+   listed in the import messages. Fittings are pasted without a length, `fitting, size, qty [, schedule]`:
+   `ELBOW, 6, 8, 40`, `ELBOW 45`, `ELBOW SR`, `ELBOW 3D`, `RETURN`, `PIPE TEE, 6 x 4, 2`, `CROSS`, `REDUCER, 8 x 6, 1`,
+   `ECC REDUCER`, `CAP`, `STUB END`, `STUB END SHORT`. Two sizes make an elbow, tee or cross the reducing one; a plain
+   `TEE` is still the structural tee.
 2. **Environment and system.**
    * Pick the protection (painted blast-cleaned steel; hot-dip galvanized only; duplex, i.e. galvanized and painted;
      paint over thermal-sprayed metal), the environment
      (C1–C5 and CX in air; Im1–Im3 in water or soil; Im4) and the durability you need. *Not sure?* works the category
      out from measured first-year corrosion of steel or zinc specimens (ISO 12944-2 Table 1).
-   * Every Jotun system from the selector that reaches that durability is listed, least paint first, with the litres
-     it needs for your job. *Use* loads it into the layer editor.
+   * Every system of the chosen supplier (Jotun, Hempel or PPG, from their ISO 12944 brochures) that reaches that
+     durability is listed, least paint first, with the litres it needs for your job. *Use* loads it into the layer
+     editor.
    * Edit anything: products, coats, DFT, solids, add or remove layers. The **ISO 12944-5 check** shows which
      durability the build allows (low / medium / high / very high, with each minimum) and what is missing for the
      next class. Warnings flag DFTs outside a product's range and zinc primers outside 40–80 µm.
-   * Choosing Carboline or PPG keeps Jotun's builds and substitutes that supplier's product of the same type (flagged:
-     those combinations are nobody's certified system). Alkyd systems drop out for them (no alkyd products).
+   * Choosing Carboline (no brochure systems yet) keeps Jotun's builds and substitutes Carboline's product of the same
+     type (flagged: those combinations are nobody's certified system). Alkyd systems drop out (no alkyd products).
    * Notes give the surface preparation for the substrate and primer (Table B.1, ISO 12944-4), inspection limits and
      ISO 12944-3 design points.
    * **Hot-dip galvanized only** shows no paint systems. Pick the steel thickness (or let the member list set it from
@@ -50,7 +56,8 @@ it keeps your list in the browser's `localStorage`.
      * for Im1–Im4, gives no life figure: specialist advice, consider duplex.
 
      **Duplex** shows the same zinc panel above the ISO 12944 Table B.3 paint systems.
-3. **Allowances.** Application loss (default 30 %) and extra area for flanges, cleats and fittings.
+3. **Allowances.** Application loss (default 30 %) and extra area for flanges, valves, cleats and anything else
+   not in the list.
 4. **Results.** Total, pipe and steel area, steel mass, and for each layer: coats × DFT, wet film, coverage,
    litres per coat, theoretical litres and litres with loss; whole litres to order per product; and a
    **specification summary** (environment, preparation, system, NDFT, ISO compliance, inspection) to copy into a
@@ -108,6 +115,23 @@ The calculator is only as good as `data/`. Read this before relying on it for an
 **Pipe (`data/pipes.js`).** ASME B36.10M outside diameters and wall thicknesses, taken from the tables in the
 open-source [`fluids`](https://pypi.org/project/fluids/) package (MIT) and spot-checked (NPS 6: 168.3 mm, 7.11 mm
 Sch 40, 21.95 mm XXS; mass 28.26 kg/m for 6" Sch 40). NPS 10 and 12 use the 2018 edition ODs (273.1 and 323.9 mm).
+
+**Pipe fittings (`data/fittings.js`).** ASME B16.9-2018 Tables 6.1-1 to 6.1-11 (elbows, reducing elbows, returns,
+3D elbows, straight and reducing outlet tees and crosses, stub ends, caps, reducers), transcribed from the standard
+supplied by the project owner (the PDF is licensed and is not stored here). Every row was read against the page
+images; every mm value agrees with its printed inch value × 25.4; and 54 values were cross-checked against published
+web tables (Wermac, Texas Flange and others), all matching. Two oddities are printed in the standard and kept: the
+straight tee M falls from 749 mm (NPS 40) to 711 mm (NPS 42), and the 22 × 14 reducer gives the small-end OD as
+355.4 mm. B16.9 gives NPS 10 and 12 ODs of 273.0 and 323.8 mm; the fitting areas use those.
+Areas are computed from the dimensions (`fittingArea` in `calc.js`): elbows and returns are a bent tube, π × OD ×
+centreline arc (R = A, the 90° centre-to-end; reducing elbows on the mean OD); tees and crosses are the run (2C) plus
+each branch out to M, integrated over the intersection curve, less the hole it cuts in the run; reducers a cone
+frustum; caps a 2:1 elliptical head plus the straight barrel to E (E1 for walls over the table's limit); stub ends
+the barrel, both faces of the lap and its rim (the lap taken as thick as the pipe wall, the standard's minimum).
+Nominal dimensions, no tolerances. The wall comes from the B36.10M schedule chosen, and the steel mass is area × wall
+× 7850 kg/m³ at mid-wall: a 6" STD long radius elbow comes out at 10.2 kg against about 10.3 kg in catalogues, but
+forged tees are thicker at the crotch than the pipe and weigh more than this estimate. The inside area (painted or
+galvanized) is the outside area × (OD − 2t)/OD.
 
 **Structural steel, SAISC (`data/sections-saisc.js`, 793 sections, listed first).** Generated from a SAISC
 section database for Autodesk Robot (`sources/Saiscpro.xml`, supplied by the project owner) by
@@ -272,7 +296,8 @@ Everything is data in `data/*.js`; the app and tests pick up edits to these file
 npm test        # node:test, no dependencies
 ```
 
-They check the pipe tables against B36.10M values; section areas against published values, the geometry and the values
+They check the pipe tables against B36.10M values; the fitting tables at spot values from B16.9 and every fitting
+area against closed forms (equal tee, cone, elliptical head) and a catalogue elbow weight; section areas against published values, the geometry and the values
 verified row by row for SAISC and AISC; the catalogue order, labels and the import's choice between catalogues;
 every product's spreading rate against its data sheet; the Annex B tables (spot values, and that minimums never fall as
 durability rises); every Jotun system against those tables; the compliance engine's columns, shortfalls and edge

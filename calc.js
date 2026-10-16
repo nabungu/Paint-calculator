@@ -72,11 +72,103 @@
     return (Math.PI * 7850 * (pipe.od - t) * t) / 1e6;
   }
 
+  // ------------------------------------------------------------------ pipe fittings (ASME B16.9)
+  // Each type: which B16.9 table holds its dimensions and how its outside area follows from them.
+  const FITTING_TYPES = [
+    { id: "elbow90LR", name: "Elbow 90° LR", full: "90° elbow, long radius (1.5D)", table: "elbowLR", angle: 90 },
+    { id: "elbow45LR", name: "Elbow 45° LR", full: "45° elbow, long radius (1.5D)", table: "elbowLR", angle: 45 },
+    { id: "elbow90SR", name: "Elbow 90° SR", full: "90° elbow, short radius (1D)", table: "elbowSR", angle: 90 },
+    { id: "elbow90_3D", name: "Elbow 90° 3D", full: "90° elbow, 3D radius", table: "elbow3D", angle: 90 },
+    { id: "elbow45_3D", name: "Elbow 45° 3D", full: "45° elbow, 3D radius", table: "elbow3D", angle: 45 },
+    { id: "elbow90LRRed", name: "Reducing elbow 90° LR", full: "90° reducing elbow, long radius", table: "elbowLRReducing", reducing: true, angle: 90 },
+    { id: "return180LR", name: "Return 180° LR", full: "180° return, long radius", table: "returnLR", angle: 180 },
+    { id: "return180SR", name: "Return 180° SR", full: "180° return, short radius", table: "returnSR", angle: 180 },
+    { id: "tee", name: "Equal tee", full: "Straight (equal) tee", table: "tee", branches: 1 },
+    { id: "cross", name: "Equal cross", full: "Straight (equal) cross", table: "tee", branches: 2 },
+    { id: "teeRed", name: "Reducing tee", full: "Reducing outlet tee", table: "teeReducing", reducing: true, branches: 1 },
+    { id: "crossRed", name: "Reducing cross", full: "Reducing outlet cross", table: "teeReducing", reducing: true, branches: 2 },
+    { id: "reducerConc", name: "Concentric reducer", full: "Concentric reducer", table: "reducer", reducing: true },
+    { id: "reducerEcc", name: "Eccentric reducer", full: "Eccentric reducer", table: "reducer", reducing: true },
+    { id: "cap", name: "Cap", full: "Cap (2:1 elliptical)", table: "cap" },
+    { id: "stubEndLong", name: "Stub end, long", full: "Lap joint stub end, long pattern (ASME)", table: "stubEnd", pattern: "FLong" },
+    { id: "stubEndShort", name: "Stub end, short", full: "Lap joint stub end, short pattern (MSS)", table: "stubEnd", pattern: "FShort" }
+  ];
+  const fittingsDb = () => db().fittings || null;
+  const fittingType = (id) => FITTING_TYPES.find((t) => t.id === id) || null;
+  const fitSizeKey = (nps, nps2) => (nps2 ? `${nps} x ${nps2}` : nps);
+  /** Sizes a fitting type comes in: "6", or "6 x 4" for reducing fittings, in the standard's order. */
+  function fittingSizes(typeId) {
+    const t = fittingType(typeId), f = fittingsDb();
+    if (!t || !f || !f[t.table]) return [];
+    const tab = f[t.table];
+    return Array.isArray(tab) ? tab.map((r) => fitSizeKey(r.size, r.size2)) : Object.keys(tab);
+  }
+  /** The table row for a fitting, with the ODs: { row, nps, nps2, D, d } or null. */
+  function fittingRow(typeId, size) {
+    const t = fittingType(typeId), f = fittingsDb();
+    if (!t || !f || !f[t.table]) return null;
+    const tab = f[t.table];
+    const [nps, nps2] = String(size).split(" x ");
+    const row = Array.isArray(tab) ? tab.find((r) => r.size === nps && r.size2 === nps2) : tab[nps];
+    if (!row) return null;
+    const D = f.od[nps], d = nps2 ? f.od[nps2] : D;
+    return D ? { row, nps, nps2: nps2 || null, D, d } : null;
+  }
+  // outside area of a branch of diameter d standing on a run of diameter D, M from the run axis to the branch end,
+  // and the patch of run surface the branch removes (mm2); both integrated numerically over the intersection curve
+  function branchAreas(D, d, M) {
+    const R = D / 2, r = d / 2, N = 720;
+    let branch = 0, hole = 0;
+    for (let i = 0; i < N; i++) {
+      const psi = ((i + 0.5) / N) * 2 * Math.PI;                         // around the branch
+      branch += r * (M - Math.sqrt(Math.max(0, R * R - (r * Math.sin(psi)) ** 2))) * ((2 * Math.PI) / N);
+      const phi = ((i + 0.5) / N) * Math.PI;                             // over the top half of the run
+      hole += R * 2 * Math.sqrt(Math.max(0, r * r - (R * Math.cos(phi)) ** 2)) * (Math.PI / N);
+    }
+    return { branch, hole };
+  }
+  // 2:1 elliptical head (half an oblate spheroid): outside area = k x (D/2)^2, k = pi (1 + (1 - e^2)/e atanh e),
+  // e = sqrt(3)/2, so about 1.084 D^2
+  const HEAD_K = Math.PI * (1 + (0.25 / (Math.sqrt(3) / 2)) * Math.atanh(Math.sqrt(3) / 2));
+  /**
+   * Outside area of one fitting, m2, from its B16.9 dimensions:
+   *   elbows and returns  pi x OD x centreline length (Pappus; R = A for elbows, O/2 for returns), reducing elbows on
+   *                       the mean OD; tees and crosses the run (2C) plus each branch (to M) less the hole it cuts;
+   *   reducers            cone frustum over length H; caps a 2:1 elliptical head plus the straight barrel to E
+ *                       (E1 when the wall is over the table's limit);
+   *   stub ends           barrel to F plus both faces and the rim of the lap (lap thickness = the pipe wall, `wall`, mm).
+   */
+  function fittingArea(typeId, size, wall) {
+    const t = fittingType(typeId), g = fittingRow(typeId, size);
+    if (!t || !g) return null;
+    const { row, D, d } = g, PI = Math.PI;
+    let mm2;
+    if (t.angle && t.table.startsWith("return")) mm2 = PI * D * (PI * row.O / 2);
+    else if (t.angle) {
+      const R = row.A;                                                      // 90 deg centre-to-end = bend radius
+      mm2 = PI * ((D + d) / 2) * R * (t.angle * PI / 180);
+    } else if (t.branches) {
+      const b = branchAreas(D, d, row.M);
+      mm2 = PI * D * 2 * row.C + t.branches * (b.branch - b.hole);
+    } else if (t.table === "reducer") {
+      mm2 = PI * (D / 2 + d / 2) * Math.sqrt(row.H ** 2 + (D / 2 - d / 2) ** 2);
+    } else if (t.table === "cap") {
+      const E = wall && row.tLimit && row.E1 && wall > row.tLimit ? row.E1 : row.E;   // E1 for walls over the limit
+      mm2 = HEAD_K * (D / 2) ** 2 + PI * D * Math.max(0, E - D / 4);
+    } else if (t.table === "stubEnd") {
+      const F = row[t.pattern], G = row.G, T = wall || 0;                 // the lap is at least the pipe wall thick
+      mm2 = PI * D * F + 2 * (PI / 4) * (G * G - D * D) + PI * G * T;
+    }
+    return mm2 / 1e6;
+  }
+
   /**
    * Work out one list line.
    * line = { kind: 'pipe', size: '6', schedule: 'STD', surfaces: 'ext'|'both', length, qty }
    *      | { kind: 'section', family: 'SA-UB', size: '254x146x31', paintPct: 100, length, qty }
    *      | { kind: 'custom', label, perimeter (mm, all painted faces), massPerM (kg/m, optional), length, qty }
+   *      | { kind: 'fitting', fitting: 'elbow90LR', size: '6' or '6 x 4', schedule: 'STD', surfaces: 'ext'|'both', qty }
+   * Fittings are counted per piece: areaPerPiece and massPerPiece, no length.
    * Returns { ok, error?, label, areaPerM, massPerM, totalLength, area, mass, warnings }; section lines also give
    * catalogue and note (the table's flag for a legacy, superseded or discontinued size, or null).
    */
@@ -97,6 +189,30 @@
       out.areaPerM = perM;
       out.massPerM = line.schedule ? pipeMassPerM(pipe, line.schedule) : null;
       if (line.schedule && out.massPerM === null) out.warnings.push(`NPS ${pipe.nps} has no Sch ${line.schedule} in B36.10M`);
+    } else if (line.kind === "fitting") {
+      const t = fittingType(line.fitting), g = t && fittingRow(line.fitting, line.size);
+      if (!g) { out.error = `Unknown fitting "${t ? t.name : line.fitting} NPS ${line.size}" in ASME B16.9`; return out; }
+      const pipe = findPipe(g.nps), sched = line.schedule || "STD", wall = pipe && pipe.walls[sched];
+      const outer = fittingArea(line.fitting, line.size, wall);
+      out.label = `${t.name} NPS ${line.size}` + (line.schedule ? ` Sch ${line.schedule}` : "");
+      out.perPiece = true;
+      out.totalLength = 0;
+      out.areaPerPiece = outer;
+      out.innerPerPiece = wall ? (outer * (g.D - 2 * wall)) / g.D : null;
+      if (line.surfaces === "both") {
+        if (out.innerPerPiece === null) out.warnings.push(`NPS ${g.nps} has no Sch ${sched} wall: internal area left out`);
+        else out.areaPerPiece += out.innerPerPiece;
+      }
+      // steel = outside area x wall x (D - t)/D (the mean surface), 7850 kg/m3; the fitting's wall matches the pipe's
+      out.massPerPiece = wall ? (outer * (wall / 1000) * ((g.D - wall) / g.D)) * 7850 : null;
+      if (!wall) out.warnings.push(`NPS ${g.nps} has no Sch ${sched} wall in B36.10M: mass unknown`);
+      out.wall = wall || null;
+      out.areaPerM = out.areaPerPiece;                     // per piece (no length)
+      out.massPerM = out.massPerPiece;
+      out.area = out.areaPerPiece * qty;
+      out.mass = out.massPerPiece === null ? null : out.massPerPiece * qty;
+      out.ok = true;
+      return out;
     } else if (line.kind === "custom") {
       // anything not in the database (flat bar, plate, welded section ...): the user supplies the perimeter in mm
       const perimeter = num(line.perimeter);
@@ -124,12 +240,13 @@
 
   /** Totals over a list of lines, with an optional % allowance on area (fittings, cleats, flanges ...). */
   function totals(lines, allowancePct) {
-    const res = { lines: [], pipeArea: 0, steelArea: 0, pipeLength: 0, steelLength: 0, mass: 0, massKnown: true, errors: 0 };
+    const res = { lines: [], pipeArea: 0, steelArea: 0, pipeLength: 0, steelLength: 0, fittingArea: 0, fittingCount: 0, mass: 0, massKnown: true, errors: 0 };
     for (const line of lines) {
       const m = lineMetrics(line);
       res.lines.push(m);
       if (!m.ok) { res.errors++; continue; }
       if (line.kind === "pipe") { res.pipeArea += m.area; res.pipeLength += m.totalLength; }
+      else if (line.kind === "fitting") { res.pipeArea += m.area; res.fittingArea += m.area; res.fittingCount += num(line.qty); }
       else { res.steelArea += m.area; res.steelLength += m.totalLength; } // sections and custom members
       if (m.mass === null) res.massKnown = false; else res.mass += m.mass;
     }
@@ -427,6 +544,10 @@
    * an angle, the wall of a tube, lipped section or pipe. Null for custom members (no thickness known).
    */
   function elementThickness(line) {
+    if (line.kind === "fitting") {
+      const g = fittingRow(line.fitting, line.size), p = g && findPipe(g.nps), t = p && p.walls[line.schedule || "STD"];
+      return t ? { min: t, max: t } : null;
+    }
     if (line.kind === "pipe") {
       const p = findPipe(line.size), t = p && p.walls[line.schedule];
       return t ? { min: t, max: t } : null;
@@ -487,6 +608,10 @@
   function galvAreaPerM(line, inside) {
     const m = lineMetrics(line);
     if (!m.ok) return null;
+    if (m.perPiece) {                    // a fitting: area per piece; dipped, it is coated inside as well
+      const inner = inside && line.surfaces !== "both" ? m.innerPerPiece || 0 : 0;
+      return { outer: m.areaPerPiece, inner, total: m.areaPerPiece + inner, label: m.label, massPerM: m.massPerPiece, perPiece: true };
+    }
     let perM = m.areaPerM, inner = 0;
     if (inside) {
       if (line.kind === "pipe" && line.surfaces !== "both") inner = pipeInternalPerM(findPipe(line.size), line.schedule) || 0;
@@ -503,7 +628,7 @@
     for (const line of lines) {
       const g = galvAreaPerM(line, inside);
       if (!g) continue;
-      const len = num(line.length) * num(line.qty);
+      const len = g.perPiece ? num(line.qty) : num(line.length) * num(line.qty);
       outer += g.outer * len; inner += g.inner * len;
     }
     const base = outer + inner;
@@ -513,7 +638,7 @@
   function pieceWeights(line, um, inside) {
     const g = galvAreaPerM(line, inside);
     if (!g || g.massPerM === null) return null;
-    const length = num(line.length), zinc = (g.total * length * num(um) * galv().density) / 1000;
+    const length = g.perPiece ? 1 : num(line.length), zinc = (g.total * length * num(um) * galv().density) / 1000;
     return { label: g.label, qty: num(line.qty), steel: g.massPerM * length, zinc, total: g.massPerM * length + zinc };
   }
 
@@ -646,6 +771,36 @@
    * the size picks the family (SAISC first, then EN, then AISC) and a warning says when another family has it too.
    * Returns { lines, errors, warnings } where errors/warnings are [{ row, text, message }]; a line with an error is skipped.
    */
+  /**
+   * Fitting type from a paste-list family word, or null: ELBOW (90 LR), ELBOW 45, ELBOW SR, ELBOW 3D, ELBOW 45 3D,
+   * RETURN, RETURN SR, PIPE TEE, CROSS, REDUCER, ECC REDUCER, CAP, STUB END. A plain TEE stays the structural tee.
+   * A reducing size picks the reducing elbow, tee or cross.
+   */
+  function resolveFittingType(word, reducing) {
+    const w = " " + String(word).toUpperCase().replace(/°|º|DEG(REES?)?/g, " ").replace(/[-_/.]/g, " ").replace(/\s+/g, " ").trim() + " ";
+    const has = (re) => re.test(w);
+    if (has(/ STUB /)) return has(/ SHORT | MSS /) ? "stubEndShort" : "stubEndLong";
+    if (has(/ CAPS? /)) return "cap";
+    if (has(/ REDUCERS? /)) return has(/ ECC(ENTRIC)? /) ? "reducerEcc" : "reducerConc";
+    if (has(/ CROSS(ES)? /)) return reducing ? "crossRed" : "cross";
+    if (has(/ TEES? /) && has(/ (PIPE|EQUAL|STRAIGHT|REDUCING|RED|BW|BUTTWELD) /)) return reducing ? "teeRed" : "tee";
+    if (has(/ RETURNS? | 180 /)) return has(/ SR | SHORT /) ? "return180SR" : "return180LR";
+    if (has(/ (ELBOWS?|ELLS?|BENDS?) /)) {
+      const a45 = has(/ 45 /), r3 = has(/ 3D | 3R /), sr = has(/ SR | SHORT /);
+      if (r3) return a45 ? "elbow45_3D" : "elbow90_3D";
+      if (sr) return a45 ? "none" : "elbow90SR";
+      if (a45) return "elbow45LR";
+      return reducing ? "elbow90LRRed" : "elbow90LR";
+    }
+    return null;
+  }
+  /** "6", "DN150", "6 x 4", "DN150 x DN100", "1 1/2 x 3/4" -> "6" or "6 x 4" in the pipe table's labels, or null. */
+  function resolveFittingSize(token) {
+    const parts = String(token).split(/\s*[x×X*]\s*/).filter(Boolean).map(resolvePipe);
+    if (!parts.length || parts.length > 2 || parts.some((x) => !x)) return null;
+    return parts.length === 2 && parts[0] !== parts[1] ? `${parts[0]} x ${parts[1]}` : parts[0];
+  }
+
   function parseList(text) {
     const lines = [], errors = [], warnings = [];
     const rows = String(text).split(/\r?\n/);
@@ -658,6 +813,26 @@
       // with tab/semicolon delimiters a decimal comma ("6,5") is accepted
       const dec = (c) => parseFloat(delim === "," ? c : String(c).replace(",", "."));
       if (/^(type|family|member)$/i.test(cells[0])) return; // header
+      const fitSize = cells.length >= 3 ? resolveFittingSize(cells[1]) : null;
+      const fitType = resolveFittingType(cells[0], !!fitSize && fitSize.includes(" x "));
+      if (fitType) {
+        // fittings: family, size, quantity [, schedule]
+        if (fitType === "none") { errors.push({ row, text: t, message: "ASME B16.9 has no 45° short radius elbow" }); return; }
+        const ft = fittingType(fitType);
+        if (cells.length < 3) { errors.push({ row, text: t, message: "Need: fitting, size, quantity" }); return; }
+        if (!fitSize) { errors.push({ row, text: t, message: `Unknown pipe size "${cells[1]}"` }); return; }
+        const fq = dec(cells[2]);
+        if (!(fq > 0)) { errors.push({ row, text: t, message: "Quantity must be a positive number" }); return; }
+        if (!fittingRow(fitType, fitSize)) { errors.push({ row, text: t, message: `ASME B16.9 has no ${ft.full.toLowerCase()} NPS ${fitSize}` }); return; }
+        const pipe = findPipe(fitSize.split(" x ")[0]);
+        const schedule = cells[3] ? cells[3].toUpperCase().replace(/^SCH\.?\s*/, "") : "STD";
+        if (!pipe || !(schedule in pipe.walls)) {
+          errors.push({ row, text: t, message: `NPS ${fitSize.split(" x ")[0]} has no schedule "${schedule}"${pipe ? ` (available: ${Object.keys(pipe.walls).join(", ")})` : ""}` });
+          return;
+        }
+        lines.push({ kind: "fitting", fitting: fitType, size: fitSize, schedule, surfaces: "ext", qty: fq });
+        return;
+      }
       if (cells.length < 4) { errors.push({ row, text: t, message: "Need: family, size, length (m), quantity" }); return; }
       const [fam, size, lenC, qtyC, extra] = cells;
       const length = dec(lenC), qty = dec(qtyC);
@@ -686,13 +861,13 @@
   }
 
   return {
-    findPipe, findFamily, findSection, SECTION, catalogues, findCatalogue, sectionName, sectionGroups,
+    findPipe, findFamily, findSection, SECTION, FITTING_TYPES, fittingType, fittingSizes, fittingRow, fittingArea, catalogues, findCatalogue, sectionName, sectionGroups,
     pipeExternalPerM, pipeInternalPerM, pipeMassPerM,
     lineMetrics, totals,
     getSupplier, getProduct, pickProduct, paintQuantities,
     getEnv, systemsFor, getLibrarySystem, systemLayers, requirementsFor, assess, durabilitiesFor,
     productWarnings, checkLayers, recommend, categoryFromLoss, systemSuppliers,
     galvBand, bandForThickness, elementThickness, galvCheck, zincLife, lifeText, lifeMeets, zincQuantities, galvAreaPerM, galvArea, pieceWeights,
-    resolvePipe, resolveSection, normSize, parseList
+    resolvePipe, resolveSection, resolveFittingType, resolveFittingSize, normSize, parseList
   };
 });

@@ -43,7 +43,7 @@
   function sanitize(s) {
     const f = fresh();
     const out = { ...f, ...s };
-    const valid = (l) => l && (l.kind === "custom" || (l.kind === "pipe" && C.findPipe(l.size)) || (l.kind === "section" && C.findSection(l.family, l.size)));
+    const valid = (l) => l && (l.kind === "custom" || (l.kind === "pipe" && C.findPipe(l.size)) || (l.kind === "section" && C.findSection(l.family, l.size)) || (l.kind === "fitting" && C.fittingRow(l.fitting, l.size)));
     out.lines = (Array.isArray(s.lines) ? s.lines : []).filter(valid).map((l) => ({ ...l, id: l.id || newId() }));
     if (!s.env && s.cat) out.env = s.cat === "CUSTOM" ? "C4" : s.cat;   // saved by the first version, which had no env
     delete out.cat;
@@ -101,10 +101,28 @@
         `${it[S.name]} · ${nf(it[S.mass], 1)} kg/m${it[S.note] ? " *" : ""}`)));
   };
 
+  const FIT = DB.fittings;
+  const fitSizeLabel = (size) => size.split(" x ").map((n) => `NPS ${n}`).join(" × ") + ` · OD ${size.split(" x ").map((n) => nf(FIT.od[n], 1)).join(" × ")} mm`;
+  const fittingSizeSelect = (line) =>
+    h("select", { "aria-label": "Fitting size (NPS)", onchange: (e) => {
+      line.size = e.target.value;
+      const pipe = C.findPipe(line.size.split(" x ")[0]);
+      if (!pipe || !(line.schedule in pipe.walls)) line.schedule = "STD";
+      rebuildRow(line); recalc();
+    }, value: line.size },
+      C.fittingSizes(line.fitting).map((sz) => h("option", { value: sz }, fitSizeLabel(sz))));
+  /** A size for a fitting type close to `want` (same NPS, or the same run size for reducing fittings). */
+  function nearestFittingSize(typeId, want) {
+    const sizes = C.fittingSizes(typeId), w = String(want || "6");
+    return sizes.find((x) => x === w) || sizes.find((x) => x.split(" x ")[0] === w.split(" x ")[0]) || sizes.find((x) => x.startsWith("6")) || sizes[0];
+  }
+
   function typeSelect(line) {
-    const cur = line.kind === "section" ? line.family : line.kind;
+    const cur = line.kind === "section" ? line.family : line.kind === "fitting" ? "fit:" + line.fitting : line.kind;
     return h("select", { "aria-label": "Member type", onchange: (e) => changeType(line, e.target.value), value: cur },
       h("option", { value: "pipe" }, "Pipe (ASME B36.10M)"),
+      FIT ? h("optgroup", { label: "Pipe fittings: ASME B16.9 buttwelding" },
+        C.FITTING_TYPES.filter((ft) => C.fittingSizes(ft.id).length).map((ft) => h("option", { value: "fit:" + ft.id, title: ft.full }, ft.name))) : null,
       h("option", { value: "custom" }, "Custom member"),
       C.sectionGroups().map((g) => h("optgroup", { label: `${g.catalogue.name}: ${g.group}` },
         g.families.map((f) => h("option", { value: f.id, title: f.std }, `${g.catalogue.short} · ${f.name}`)))));
@@ -116,7 +134,18 @@
       h("input", { type: "number", class: cls, min, step, inputmode: "decimal", "aria-label": label, value: line[key] === undefined ? "" : line[key],
         oninput: (e) => { line[key] = numVal(e.target); recalc(); } });
     let size, spec;
-    if (line.kind === "pipe") {
+    const schedSurf = (pipe) => {
+      const scheds = pipe ? DB.pipes.schedules.filter((s) => s in pipe.walls) : [];
+      return h("div", { class: "cellpair" },
+        h("select", { "aria-label": "Schedule", onchange: (e) => { line.schedule = e.target.value; recalc(); }, value: line.schedule },
+          scheds.map((s) => h("option", { value: s }, `${/^\d/.test(s) ? "Sch " : ""}${s} · ${pipe.walls[s]} mm`))),
+        h("select", { "aria-label": "Surfaces to paint", onchange: (e) => { line.surfaces = e.target.value; recalc(); }, value: line.surfaces || "ext" },
+          h("option", { value: "ext" }, "External"), h("option", { value: "both" }, "Ext. + internal")));
+    };
+    if (line.kind === "fitting") {
+      size = fittingSizeSelect(line);
+      spec = schedSurf(C.findPipe(String(line.size).split(" x ")[0]));
+    } else if (line.kind === "pipe") {
       size = pipeSizeSelect(line);
       const pipe = C.findPipe(line.size);
       const scheds = pipe ? DB.pipes.schedules.filter((s) => s in pipe.walls) : [];
@@ -143,9 +172,11 @@
     const tr = h("tr", { dataset: { id: line.id } },
       h("td", { dataset: { label: "Type" } }, typeSelect(line)),
       h("td", { dataset: { label: "Size" } }, size, refs.msg),
-      h("td", { dataset: { label: line.kind === "pipe" ? "Schedule" : line.kind === "section" ? "Painted %" : "Details" } }, spec),
+      h("td", { dataset: { label: line.kind === "pipe" || line.kind === "fitting" ? "Schedule" : line.kind === "section" ? "Painted %" : "Details" } }, spec),
       h("td", { dataset: { label: "Qty" } }, numIn("w-qty", "Quantity", "qty", 1, 1)),
-      h("td", { dataset: { label: "Length (m)" } }, numIn("w-len", "Length of each piece in metres", "length", 0, 0.1)),
+      line.kind === "fitting"
+        ? h("td", { dataset: { label: "Length (m)" } }, h("span", { class: "perpiece", title: "Fittings are counted by the piece; the area comes from the ASME B16.9 dimensions" }, "per piece"))
+        : h("td", { dataset: { label: "Length (m)" } }, numIn("w-len", "Length of each piece in metres", "length", 0, 0.1)),
       refs.area, refs.mass,
       h("td", { class: "act" }, h("button", { class: "btn icon ghost", type: "button", title: "Remove this line", "aria-label": "Remove this line",
         onclick: () => { state.lines = state.lines.filter((l) => l !== line); rowRefs.delete(line.id); tr.remove(); toggleEmpty(); recalc(); } }, "×")));
@@ -168,9 +199,14 @@
     toggleEmpty();
   }
   function changeType(line, v) {
-    if (v === "pipe") Object.assign(line, { kind: "pipe", size: "6", schedule: "STD", surfaces: "ext" });
-    else if (v === "custom") Object.assign(line, { kind: "custom", label: "", perimeter: "", massPerM: "" });
-    else Object.assign(line, { kind: "section", family: v, size: C.findFamily(v).items[0][0], paintPct: 100 });
+    if (v.startsWith("fit:")) {
+      const id = v.slice(4), was = line.kind === "fitting" || line.kind === "pipe" ? line.size : "6";
+      const size = nearestFittingSize(id, was), pipe = C.findPipe(size.split(" x ")[0]);
+      Object.assign(line, { kind: "fitting", fitting: id, size, schedule: pipe && line.schedule in pipe.walls ? line.schedule : "STD", surfaces: line.surfaces || "ext" });
+      if (!(+line.qty > 0)) line.qty = 1;
+    } else if (v === "pipe") Object.assign(line, { kind: "pipe", size: "6", schedule: "STD", surfaces: "ext", length: line.length || 6 });
+    else if (v === "custom") Object.assign(line, { kind: "custom", label: "", perimeter: "", massPerM: "", length: line.length || 6 });
+    else Object.assign(line, { kind: "section", family: v, size: C.findFamily(v).items[0][0], paintPct: 100, length: line.length || 6 });
     rebuildRow(line);
     recalc();
   }
@@ -553,7 +589,8 @@
         : h("div", { class: "rowmsg" }, m.error));
     });
     fill($("#members-summary"),
-      summaryLine("Pipe:", `${nf(t.pipeLength, 1)} m · ${nf(t.pipeArea)} m²`),
+      summaryLine("Pipe:", `${nf(t.pipeLength, 1)} m · ${nf(t.pipeArea - t.fittingArea)} m²`),
+      t.fittingCount ? summaryLine("Fittings:", `${nf(t.fittingCount, 0)} pcs · ${nf(t.fittingArea)} m²`) : null,
       summaryLine("Steel:", `${nf(t.steelLength, 1)} m · ${nf(t.steelArea)} m²`),
       t.allowanceArea ? summaryLine(`Allowance ${nf(+state.allow, 0)}%:`, `${nf(t.allowanceArea)} m²`) : null,
       summaryLine("Total area:", `${nf(t.totalArea)} m²`),
@@ -673,7 +710,7 @@
     $("#spec").textContent = lastResult.spec.join("\n");
     fill($("#kpis"),
       h("div", { class: "kpi main" }, h("div", { class: "l" }, "Total surface area"), h("div", { class: "v" }, `${nf(t.totalArea)} m²`), h("div", { class: "s" }, t.allowanceArea ? `includes ${nf(+state.allow, 0)}% allowance` : "no allowance added")),
-      h("div", { class: "kpi" }, h("div", { class: "l" }, "Pipe"), h("div", { class: "v" }, `${nf(t.pipeArea)} m²`), h("div", { class: "s" }, `${nf(t.pipeLength, 1)} m of pipe`)),
+      h("div", { class: "kpi" }, h("div", { class: "l" }, "Pipe"), h("div", { class: "v" }, `${nf(t.pipeArea)} m²`), h("div", { class: "s" }, `${nf(t.pipeLength, 1)} m of pipe${t.fittingCount ? ` + ${nf(t.fittingCount, 0)} fittings` : ""}`)),
       h("div", { class: "kpi" }, h("div", { class: "l" }, "Structural steel"), h("div", { class: "v" }, `${nf(t.steelArea)} m²`), h("div", { class: "s" }, `${nf(t.steelLength, 1)} m of members`)),
       h("div", { class: "kpi" }, h("div", { class: "l" }, "System"), h("div", { class: "v" }, `${q.totalDft} µm`), h("div", { class: "s" }, `${q.totalCoats} coats in ${q.rows.filter((r) => r.coats > 0).length} layers`)),
       z ? h("div", { class: "kpi" }, h("div", { class: "l" }, "Zinc"), h("div", { class: "v" }, `${nf(z.zinc.kg, 0)} kg`), h("div", { class: "s" }, `${nf(z.um, 0)} µm galvanizing`)) : null,
@@ -718,8 +755,8 @@
       add("Application loss %", state.loss, "Area allowance %", state.allow);
     }
     add();
-    add("Members"); add("Description", "Qty", "Length (m)", "Area per metre (m2/m)", "Area (m2)", "Mass (kg)", "Note");
-    state.lines.forEach((l, i) => { const m = t.lines[i]; add(m.ok ? m.label : m.error, l.qty, l.length, m.ok ? m.areaPerM.toFixed(4) : "", m.ok ? m.area.toFixed(3) : "", m.ok && m.mass !== null ? m.mass.toFixed(1) : "", m.ok && m.note ? m.note : ""); });
+    add("Members"); add("Description", "Qty", "Length (m)", "Area per metre or piece (m2)", "Area (m2)", "Mass (kg)", "Note");
+    state.lines.forEach((l, i) => { const m = t.lines[i]; add(m.ok ? m.label : m.error, l.qty, m.perPiece ? "per piece" : l.length, m.ok ? m.areaPerM.toFixed(4) : "", m.ok ? m.area.toFixed(3) : "", m.ok && m.mass !== null ? m.mass.toFixed(1) : "", m.ok && m.note ? m.note : m.perPiece ? "ASME B16.9" : ""); });
     add("Total area (m2)", "", "", "", t.totalArea.toFixed(3));
     add();
     if (z) {
@@ -765,6 +802,7 @@
   function loadExample() {
     const text = [
       "PIPE, 6, 12, 20, 40", "PIPE, 10, 6, 12, STD", "PIPE, 3, 6, 30, 80",
+      "ELBOW, 6, 8, 40", "PIPE TEE, 6 x 3, 4, 40", "REDUCER, 10 x 6, 2", "CAP, 3, 2, 80",
       "UB, 305x165x40, 6.0, 8", "UC, 203x203x46, 4.5, 12", "PFC, 200x75, 6.0, 10", "L, 80x80x8, 3.0, 24", "SHS, 100x100x4, 3.0, 12"
     ].join("\n");
     const r = C.parseList(text);
@@ -775,6 +813,12 @@
   // ------------------------------------------------------------------ wiring
   $("#add-pipe").addEventListener("click", () => addLine({ kind: "pipe", size: "6", schedule: "STD", surfaces: "ext", length: 6, qty: 1 }));
   $("#add-section").addEventListener("click", () => { const f = lastSectionFamily(); addLine({ kind: "section", family: f, size: C.findFamily(f).items[0][0], paintPct: 100, length: 6, qty: 1 }); });
+  $("#add-fitting").addEventListener("click", () => {
+    const last = [...state.lines].reverse().find((l) => l.kind === "fitting" || l.kind === "pipe");
+    const id = last && last.kind === "fitting" ? last.fitting : "elbow90LR", size = nearestFittingSize(id, last ? last.size : "6");
+    const pipe = C.findPipe(size.split(" x ")[0]), sch = last && pipe && last.schedule in pipe.walls ? last.schedule : "STD";
+    addLine({ kind: "fitting", fitting: id, size, schedule: sch, surfaces: "ext", qty: 1 });
+  });
   $("#add-custom").addEventListener("click", () => addLine({ kind: "custom", label: "", perimeter: "", massPerM: "", length: 6, qty: 1 }));
   $("#open-paste").addEventListener("click", () => { $("#paste-msgs").replaceChildren(); dialog.showModal(); $("#paste-text").focus(); });
   $("#paste-close").addEventListener("click", () => dialog.close());

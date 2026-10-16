@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
-for (const f of ["pipes", "sections-saisc", "sections", "sections-aisc", "paints", "paints-hempel", "iso12944", "galvanizing", "systems", "systems-ppg", "systems-hempel"]) require(path.join("..", "data", f + ".js"));
+for (const f of ["pipes", "sections-saisc", "sections", "sections-aisc", "paints", "paints-hempel", "iso12944", "galvanizing", "systems", "systems-ppg", "systems-hempel", "fittings"]) require(path.join("..", "data", f + ".js"));
 const C = require("../calc.js");
 const DB = globalThis.PaintDB;
 
@@ -688,4 +688,84 @@ test("steel element thickness for the ISO 1461 band", () => {
     const x = t({ kind: "section", family: f.id, size: it[0] });
     assert.ok(x && x.min > 0 && x.max >= x.min && x.max <= 140, `${f.id} ${it[0]}`);   // UC 356x406x1086 flange 140
   }
+});
+
+// ---------------------------------------------------------------- pipe fittings (ASME B16.9)
+test("fitting tables: spot values from ASME B16.9-2018", () => {
+  const F = DB.fittings;
+  assert.equal(F.od["6"], 168.3);
+  assert.deepEqual(F.elbowLR["6"], { A: 229, B: 95 });
+  assert.equal(F.elbowSR["6"].A, 152);
+  assert.equal(F.elbow3D["6"].A, 457);
+  assert.equal(F.returnLR["6"].O, 457);
+  assert.deepEqual(F.tee["6"], { C: 143, M: 143 });
+  assert.equal(F.reducer.find((r) => r.size === "6" && r.size2 === "4").H, 140);
+  assert.equal(F.cap["6"].E, 89);
+  assert.equal(F.stubEnd["6"].G, 216);
+  // every type has sizes, every size resolves, and every area is positive
+  for (const t of C.FITTING_TYPES) {
+    const sizes = C.fittingSizes(t.id);
+    assert.ok(sizes.length > 5, t.id);
+    for (const sz of sizes) {
+      const a = C.fittingArea(t.id, sz, 6);
+      assert.ok(a > 0 && a < 30, `${t.id} ${sz}: ${a}`);
+      assert.ok(C.findPipe(sz.split(" x ")[0]), `${t.id} ${sz}: no pipe`);
+    }
+  }
+});
+
+test("fitting areas follow the shape", () => {
+  const D = 168.3, R = D / 2, PI = Math.PI;
+  close(C.fittingArea("elbow90LR", "6"), (PI * D * 229 * PI / 2) / 1e6, 1e-9, "LR 90");
+  close(C.fittingArea("elbow45LR", "6"), (PI * D * 229 * PI / 4) / 1e6, 1e-9, "LR 45 on the 90 deg radius");
+  close(C.fittingArea("return180LR", "6"), (PI * D * PI * 457 / 2) / 1e6, 1e-9, "return");
+  // equal tee: run + branch - hole = pi D 2C + (pi D M - 4R^2) - 4R^2 (closed form for d = D)
+  close(C.fittingArea("tee", "6"), (PI * D * 2 * 143 + PI * D * 143 - 8 * R * R) / 1e6, 2e-5, "equal tee");
+  close(C.fittingArea("cross", "6") - C.fittingArea("tee", "6"), (PI * D * 143 - 8 * R * R) / 1e6, 2e-5, "second branch");
+  // a reducer is a cone frustum
+  const d = 114.3, H = 140;
+  close(C.fittingArea("reducerConc", "6 x 4"), (PI * (D + d) / 2 * Math.sqrt(H * H + ((D - d) / 2) ** 2)) / 1e6, 1e-9, "reducer");
+  // a 2:1 elliptical head is about 1.084 D^2
+  close(C.fittingArea("cap", "6", 7.11) - (PI * D * (89 - D / 4)) / 1e6, 1.0842 * D * D / 1e6, 1e-5, "cap head");
+  assert.ok(C.fittingArea("cap", "6", 14.27) > C.fittingArea("cap", "6", 7.11), "thick-wall cap uses E1");
+  assert.ok(C.fittingArea("stubEndLong", "6", 7.11) > C.fittingArea("stubEndShort", "6", 7.11));
+  assert.equal(C.fittingArea("tee", "7"), null);
+});
+
+test("fitting lines: per piece, mass from the schedule wall, totals with pipe", () => {
+  const m = C.lineMetrics({ kind: "fitting", fitting: "elbow90LR", size: "6", schedule: "STD", surfaces: "ext", qty: 4 });
+  assert.equal(m.ok, true);
+  assert.equal(m.perPiece, true);
+  assert.equal(m.totalLength, 0);
+  close(m.area, 4 * m.areaPerPiece, 1e-12);
+  close(m.massPerPiece, 10.3, 0.6, "6in STD LR elbow, catalogue about 10.3 kg");
+  const both = C.lineMetrics({ kind: "fitting", fitting: "elbow90LR", size: "6", schedule: "STD", surfaces: "both", qty: 1 });
+  close(both.areaPerPiece, m.areaPerPiece * (1 + (168.3 - 2 * 7.11) / 168.3), 1e-12, "inside");
+  assert.equal(C.lineMetrics({ kind: "fitting", fitting: "teeRed", size: "6 x 1" }).ok, false);   // not a B16.9 size
+  const t = C.totals([{ kind: "pipe", size: "6", schedule: "STD", length: 6, qty: 1 },
+    { kind: "fitting", fitting: "elbow90LR", size: "6", schedule: "STD", qty: 2 }], 0);
+  close(t.pipeArea, C.pipeExternalPerM(C.findPipe("6")) * 6 + 2 * m.areaPerPiece, 1e-9);
+  assert.equal(t.fittingCount, 2);
+  assert.equal(t.pipeLength, 6);
+  // galvanizing counts fittings per piece, inside included
+  const g = C.galvArea([{ kind: "fitting", fitting: "elbow90LR", size: "6", schedule: "STD", qty: 2 }], 0, true);
+  close(g.outer, 2 * m.areaPerPiece, 1e-12);
+  assert.ok(g.inner > 0);
+  const w = C.pieceWeights({ kind: "fitting", fitting: "elbow90LR", size: "6", schedule: "STD", qty: 2 }, 85, true);
+  close(w.steel, m.massPerPiece, 1e-9);
+  assert.deepEqual(C.elementThickness({ kind: "fitting", fitting: "elbow90LR", size: "6", schedule: "XS" }), { min: 10.97, max: 10.97 });
+});
+
+test("paste list: fitting words and reducing sizes", () => {
+  const r = C.parseList(["ELBOW, 6, 4", "ELBOW 45, DN100, 2, 40", "90 deg LR elbow; 8; 3", "ELBOW, 6 x 4, 1", "ELBOW 3D, 6, 1", "ELBOW SR, 6, 1",
+    "PIPE TEE, 6x4, 3", "CROSS, 6, 1", "RETURN SR, 4, 1", "REDUCER, 8 x 6, 1", "ECC REDUCER, 8 x 6, 1", "CAP, 4, 2, XS", "STUB END, 4, 2", "STUB END SHORT, 4, 2",
+    "ELBOW 45 SR, 6, 1", "REDUCER, 6, 1", "PIPE TEE, 6 x 1, 1", "CAP, 4, 2, 160X", "TEE, 203x133x25, 6, 2"].join("\n"));
+  assert.deepEqual(r.lines.map((l) => `${l.fitting || l.family} ${l.size} ${l.qty} ${l.schedule || ""}`.trim()), [
+    "elbow90LR 6 4 STD", "elbow45LR 4 2 40", "elbow90LR 8 3 STD", "elbow90LRRed 6 x 4 1 STD", "elbow90_3D 6 1 STD", "elbow90SR 6 1 STD",
+    "teeRed 6 x 4 3 STD", "cross 6 1 STD", "return180SR 4 1 STD", "reducerConc 8 x 6 1 STD", "reducerEcc 8 x 6 1 STD", "cap 4 2 XS",
+    "stubEndLong 4 2 STD", "stubEndShort 4 2 STD", "SA-STI 203x133x25 2"]);
+  assert.deepEqual(r.errors.map((e) => e.row), [15, 16, 17, 18]);
+  assert.match(r.errors[0].message, /no 45° short radius/);
+  assert.match(r.errors[2].message, /no reducing outlet tee NPS 6 x 1/);
+  assert.equal(r.lines.filter((l) => l.kind === "section").length, 1, "a plain TEE is still the structural tee");
 });

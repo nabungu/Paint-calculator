@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Paint &amp; Galvanizing Calculator</title>
-<meta name="description" content="Surface area and ISO 12944 paint quantities (primer, mid coat, finish) for ASME B36.10M pipe and structural steel sections.">
+<meta name="description" content="Surface area and ISO 12944 paint quantities (primer, mid coat, finish) for ASME B36.10M pipe, ASME B16.9 fittings and structural steel sections.">
 <style>
 :root {
   /* EPCM Holdings palette: navy wordmark and the cyan-to-green "m" */
@@ -106,6 +106,7 @@ tfoot td { font-weight: 700; border-bottom: 0; background: var(--panel-2); }
 .cellpair > * { flex: 1; }
 tr.err td { background: var(--bad-bg); }
 .rowmsg { color: var(--bad); font-size: 12px; margin-top: 3px; }
+.members .perpiece { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .rowwarn { color: var(--warn-ink); font-size: 12px; margin-top: 3px; }
 .rownote { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .empty { color: var(--muted); padding: 18px 6px; text-align: center; }
@@ -217,7 +218,7 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
 </header>
 <div class="wrap">
   <header class="top">
-    <p>Surface area of ASME B36.10M pipe and SAISC, EN and AISC steel sections, and the primer, mid coat and finish needed for an ISO 12944 environment and durability, from Jotun, Hempel and PPG's own ISO 12944 systems, each checked against the minimums in ISO 12944-5. For hot-dip galvanizing it checks the coating against ISO 1461 and gives the zinc mass, the weight added to each piece and the life to first maintenance (ISO 14713-1). All figures are estimates: check the notes at the bottom before ordering.</p>
+    <p>Surface area of ASME B36.10M pipe, ASME B16.9 buttwelding fittings and SAISC, EN and AISC steel sections, and the primer, mid coat and finish needed for an ISO 12944 environment and durability, from Jotun, Hempel and PPG's own ISO 12944 systems, each checked against the minimums in ISO 12944-5. For hot-dip galvanizing it checks the coating against ISO 1461 and gives the zinc mass, the weight added to each piece and the life to first maintenance (ISO 14713-1). All figures are estimates: check the notes at the bottom before ordering.</p>
     <nav class="stepnav" aria-label="Steps">
       <a href="#h-members"><span class="step">1</span>Members</a>
       <a href="#h-system"><span class="step">2</span>Protection</a>
@@ -230,6 +231,7 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
     <h2 id="h-members"><span class="step">1</span> Pipes and members</h2>
     <div class="toolbar">
       <button class="btn primary" id="add-pipe" type="button">+ Pipe</button>
+      <button class="btn primary" id="add-fitting" type="button" title="Buttwelding elbow, return, tee, cross, reducer, cap or stub end to ASME B16.9">+ Pipe fitting</button>
       <button class="btn primary" id="add-section" type="button">+ Steel section</button>
       <button class="btn" id="add-custom" type="button" title="Flat bar, plate, welded section or anything not in the database">+ Custom member</button>
       <button class="btn" id="open-paste" type="button">Paste list…</button>
@@ -377,7 +379,8 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
   <details class="card sources" id="sources">
     <summary>Data sources, assumptions and limits (read before relying on the numbers)</summary>
     <ul>
-      <li><b>Pipe, ASME B36.10M.</b> Outside diameters and wall thicknesses by schedule. Painted area is π × OD per metre of pipe; the optional internal surface and the steel mass use the wall thickness. Fittings, valves and flanges are not in the database: use the area allowance.</li>
+      <li><b>Pipe, ASME B36.10M.</b> Outside diameters and wall thicknesses by schedule. Painted area is π × OD per metre of pipe; the optional internal surface and the steel mass use the wall thickness. Valves and flanges are not in the database: use the area allowance.</li>
+      <li><b>Pipe fittings, ASME B16.9-2018.</b> Long and short radius and 3D elbows (90° and 45°, and long radius reducing 90° elbows), 180° returns, equal and reducing tees and crosses, concentric and eccentric reducers, caps and lap joint stub ends (long and short pattern), from the standard's dimension tables. They are counted by the piece. Areas follow the shape: elbows and returns are a bent tube (π × OD × centreline arc), tees and crosses the run plus each branch less the hole it cuts in the run, reducers a cone, caps a short barrel and a 2:1 elliptical head, stub ends the barrel plus both faces and the rim of the lap. Nominal dimensions are used, without tolerances. The wall and the mass come from the pipe schedule chosen (mass ≈ area × wall × 7850 kg/m³, at the mid-wall surface), so they are estimates: manufacturers' weights vary.</li>
       <li><b>Structural steel, SAISC (listed first).</b> From the SAISC section database for Robot Structural Analysis (<i>Saiscpro.xml</i>): UB, UC, H-bearing piles, IPE, IPE AA, ITF joists, PFC, UPN and BS taper channels, equal and unequal angles, tees cut from UB and UC, SHS, RHS, CHS and cold-formed lipped channels, Z and angles. Painted area per metre is the full outline of the section. Every row was recomputed from its dimensions; where the file's surface figure leaves faces out or disagrees with the geometry (angles, taper channels, ITF joists, most SHS and RHS, lipped Z sections, four heavy UBs and two H-piles) the geometric outline is used, and duplicate rows are dropped. The SAISC Red Book itself was not used.</li>
       <li><b>Structural steel, EN / BS and AISC.</b> The European and British ranges (UB/UC to BS 4, IPE and HE to EN 10365, PFC, UPN to DIN 1026, EN 10056 angles, EN 10210 and EN 10219 hollow sections) and the AISC (US imperial) W, M, S, HP, C, MC, angle, tee and HSS shapes of the AISC 2001 shape list, with v16 dimensions; their areas are computed from the dimensions too, except that W, M, S and HP use AISC's published perimeter. When a pasted list names a size that is in more than one catalogue, the SAISC row is used and a note says if another table differs by more than 1 %. Sizes marked * carry a note (a legacy, superseded or discontinued size, hot-finished corner radii, or a mass caveat); check availability and anything that matters against the mill's current tables. Members not listed (flats, plate, welded sections) go in as <i>Custom member</i> with their perimeter.</li>
       <li><b>Hot-dip galvanizing.</b> Minimum coating thickness and mass from ISO 1461 (SANS 121) Tables 3 and 4, by steel thickness; coating mass = thickness × 7.2 g/cm³ (ISO 1461). Life to first maintenance is the coating thickness divided by the zinc corrosion rate of the category (ISO 9223 first-year rates, the method of ISO 14713-1), from the top and bottom of the rate band, and shown as "> 100 years" beyond 100. These first-year rates are conservative and the micro-climate matters more than the category: confirm on site (HDGASA publishes Southern African guidance). Immersion and buried service get no life figure. Tubes and pipes are counted as galvanized inside as well (inside perimeter = outside − 2πt). Real coatings are often thicker than the minimum, so actual zinc pickup and weight can be higher: ask the galvanizer. ISO 14713-1 itself was not available; the method is the one ISO 1461 Annex E points to, and the duplex factor of 1.2–1.5 is from ArcelorMittal's guide to galvanizing rolled sections.</li>
@@ -405,8 +408,9 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
   <p class="hint" style="margin:0 0 8px">One member per line, from a spreadsheet (tab-separated) or typed with commas or semicolons:<br>
     <code>family, size, length (m), quantity [, schedule for pipes | painted % for steel]</code><br>
     Family: <code>PIPE</code>, or a section word such as <code>UB</code>, <code>UC</code>, <code>IPE</code>, <code>IPE AA</code>, <code>HEA</code>/<code>HEB</code>/<code>HEM</code>, <code>PFC</code>, <code>UPN</code>, <code>L</code>, <code>T</code>, <code>SHS</code>, <code>RHS</code>, <code>CHS</code>, <code>W</code>, <code>C</code>, <code>WT</code>, <code>HSS</code> (searched in SAISC, then EN, then AISC). Put <code>EN</code> or <code>AISC</code> in front (<code>EN UB</code>) to use that table, or give a table's own id (<code>SA-UB</code>, <code>SHS-HF</code>, <code>US-W</code>).
-    Pipe size: <code>6</code>, <code>NPS 6</code>, <code>DN150</code>, <code>1 1/2</code>. A decimal comma works when you use tabs or semicolons.</p>
-  <textarea id="paste-text" spellcheck="false" placeholder="PIPE, 6, 12, 20, 40&#10;PIPE, DN80, 6, 30, 80&#10;UB, 305x165x40, 6.0, 8&#10;SHS, 100x100x5, 3.0, 12"></textarea>
+    Pipe size: <code>6</code>, <code>NPS 6</code>, <code>DN150</code>, <code>1 1/2</code>. A decimal comma works when you use tabs or semicolons.<br>
+    Fittings (ASME B16.9) have no length: <code>fitting, size, quantity [, schedule]</code>. Fitting words: <code>ELBOW</code> (90° long radius), <code>ELBOW 45</code>, <code>ELBOW SR</code>, <code>ELBOW 3D</code>, <code>ELBOW 45 3D</code>, <code>RETURN</code>, <code>RETURN SR</code>, <code>PIPE TEE</code>, <code>CROSS</code>, <code>REDUCER</code>, <code>ECC REDUCER</code>, <code>CAP</code>, <code>STUB END</code>, <code>STUB END SHORT</code>. Reducing sizes are written <code>6 x 4</code> (an elbow, tee or cross with two sizes is the reducing one). A plain <code>TEE</code> is the structural tee.</p>
+  <textarea id="paste-text" spellcheck="false" placeholder="PIPE, 6, 12, 20, 40&#10;PIPE, DN80, 6, 30, 80&#10;ELBOW, 6, 8, 40&#10;PIPE TEE, 6 x 4, 2&#10;UB, 305x165x40, 6.0, 8&#10;SHS, 100x100x5, 3.0, 12"></textarea>
   <div class="msgs" id="paste-msgs"></div>
   <div class="toolbar" style="margin:12px 0 0;justify-content:flex-end">
     <button class="btn ghost" id="paste-close" type="button">Close</button>
@@ -439,6 +443,7 @@ dialog .msgs .e { color: var(--bad); } dialog .msgs .w { color: var(--warn-ink);
 <script src="data/paints-hempel.js"></script>
 <script src="data/iso12944.js"></script>
 <script src="data/galvanizing.js"></script>
+<script src="data/fittings.js"></script>
 <script src="data/systems.js"></script>
 <script src="data/systems-ppg.js"></script>
 <script src="data/systems-hempel.js"></script>
